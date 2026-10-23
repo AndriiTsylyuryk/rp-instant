@@ -1,0 +1,26 @@
+{
+  "name": "rp-instant",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AndriiTsylyuryk/rp-instant.git"
+  },
+  "keywords": [],
+  "author": "ANDRII_TSYLYURYK <navigator.tsylyuryk@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/AndriiTsylyuryk/rp-instant/issues"
+  },
+  "homepage": "https://github.com/AndriiTsylyuryk/rp-instant#readme",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}
