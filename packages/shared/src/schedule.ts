@@ -45,9 +45,6 @@ export function getPhaseAt(
   }
 
   for (const question of questions) {
-    if (elapsedMs < question.pauseEndsAt) {
-      continue;
-    }
     if (elapsedMs < question.opensAt) {
       return {
         phase: { type: "get-ready", nextIndex: question.index },
@@ -60,10 +57,12 @@ export function getPhaseAt(
         nextBoundaryAt: question.closesAt,
       };
     }
-    return {
-      phase: { type: "pause", index: question.index },
-      nextBoundaryAt: question.pauseEndsAt,
-    };
+    if (elapsedMs < question.pauseEndsAt) {
+      return {
+        phase: { type: "pause", index: question.index },
+        nextBoundaryAt: question.pauseEndsAt,
+      };
+    }
   }
   return { phase: { type: "final" }, nextBoundaryAt: null };
 }

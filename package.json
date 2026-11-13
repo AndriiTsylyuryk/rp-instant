@@ -11,6 +11,8 @@
     "dev:api": "npm run dev -w @rp/api",
     "dev:web": "npm run dev -w web",
     "build": "npm run build -w @rp/shared && npm run build -w @rp/api && npm run build -w web",
+    "test": "npm test --workspaces --if-present",
+    "prepare": "husky",
     "pb:up": "docker compose -f docker-compose.dev.yml up -d --build",
     "pb:down": "docker compose -f docker-compose.dev.yml down"
   },
@@ -27,6 +29,7 @@
   "homepage": "https://github.com/AndriiTsylyuryk/rp-instant#readme",
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "husky": "^9.1.7",
     "typescript": "^7.0.2"
   }
 }
