@@ -7,7 +7,13 @@
     "packages/*",
     "apps/*"
   ],
-  "scripts": {},
+  "scripts": {
+    "dev:api": "npm run dev -w @rp/api",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w @rp/shared && npm run build -w @rp/api && npm run build -w web",
+    "pb:up": "docker compose -f docker-compose.dev.yml up -d --build",
+    "pb:down": "docker compose -f docker-compose.dev.yml down"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/AndriiTsylyuryk/rp-instant.git"
