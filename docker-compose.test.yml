@@ -1,0 +1,13 @@
+services:
+  pocketbase-test:
+    build:
+      context: ./pocketbase
+      args:
+        PB_VERSION: "${PB_VERSION:-0.40.6}"
+    ports: ["127.0.0.1:8091:8090"]
+    volumes:
+      - pb_test_data:/pb_data
+      - ./pocketbase/pb_migrations:/pb_migrations
+
+volumes:
+  pb_test_data:

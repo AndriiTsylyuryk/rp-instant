@@ -1,6 +1,6 @@
 import PocketBase, { ClientResponseError } from "pocketbase";
 
-const url = process.env.PB_URL || "https://127.0.0.1:8090";
+const url = process.env.PB_URL || "http://127.0.0.1:8090";
 const email = process.env.PB_SUPERUSER_EMAIL;
 const password = process.env.PB_SUPERUSER_PASSWORD;
 

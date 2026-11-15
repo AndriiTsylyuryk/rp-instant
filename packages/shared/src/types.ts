@@ -21,10 +21,10 @@ export type Phase =
 export type GameState = {
   code: string;
   status: "lobby" | "live" | "ended" | "cancelled";
-  startsAt: number;
+  startsAt: number | null;
   schedule: Schedule | null;
   joiningLocked: boolean;
-  sponsor: { name: string; logoUrl: string } | null;
+  sponsor: { name: string | null; logoUrl: string | null } | null;
 };
 
 export type PublicQuestion = {

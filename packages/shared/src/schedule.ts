@@ -1,5 +1,5 @@
 import { PAUSE_MS, QUESTION_TIME_S, STARTING_BUFFER_MS } from "./constants.js";
-import { Phase, PublicQuestion, Schedule } from "./types.js";
+import { Phase, Schedule } from "./types.js";
 
 export function buildSchedule(
   questions: Array<{ kind: "quiz" | "promo" }>,

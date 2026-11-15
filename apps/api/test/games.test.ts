@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { ClientResponseError } from "pocketbase";
 
 const mocks = vi.hoisted(() => ({
   collection: vi.fn(),
@@ -30,10 +31,10 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     id: "game_1",
     club: "club_1",
     title: "Derby",
-    joinCode: "AB12",
+    join_code: "AB12",
     status: "lobby",
     locale: "et",
-    startsAt: "2026-01-01T12:00:00.000Z",
+    starts_at: "2026-01-01T12:00:00.000Z",
     schedule: null,
     joining_locked: false,
     sponsor_name: null,
@@ -58,7 +59,7 @@ describe("getGameByCode", () => {
 
     const game = await getGameByCode("ab12");
 
-    expect(mocks.filter).toHaveBeenCalledWith("joinCode = {:code}", {
+    expect(mocks.filter).toHaveBeenCalledWith("join_code = {:code}", {
       code: "AB12",
     });
     expect(mocks.collection).toHaveBeenCalledWith("games");
@@ -80,13 +81,22 @@ describe("getGameByCode", () => {
   });
 
   it("returns null when no matching game exists", async () => {
-    getFirstListItem.mockRejectedValue(new Error("No items found."));
+    getFirstListItem.mockRejectedValue(
+      new ClientResponseError({ status: 404 }),
+    );
 
     await expect(getGameByCode("zzzz")).resolves.toBeNull();
   });
 
   it("rethrows unexpected errors", async () => {
     const error = new Error("connection refused");
+    getFirstListItem.mockRejectedValue(error);
+
+    await expect(getGameByCode("ab12")).rejects.toBe(error);
+  });
+
+  it("rethrows non-404 client errors", async () => {
+    const error = new ClientResponseError({ status: 500 });
     getFirstListItem.mockRejectedValue(error);
 
     await expect(getGameByCode("ab12")).rejects.toBe(error);
@@ -107,7 +117,9 @@ describe("getGameById", () => {
   });
 
   it("returns null when the game is missing", async () => {
-    getFirstListItem.mockRejectedValue(new Error("No items found."));
+    getFirstListItem.mockRejectedValue(
+      new ClientResponseError({ status: 404 }),
+    );
 
     await expect(getGameById("missing")).resolves.toBeNull();
   });
@@ -120,7 +132,7 @@ describe("toGame mapping (via getGameByCode)", () => {
   }
 
   it("maps an empty startsAt to null", async () => {
-    const game = await mapRow({ startsAt: "" });
+    const game = await mapRow({ starts_at: "" });
 
     expect(game?.startsAt).toBeNull();
   });
@@ -172,7 +184,7 @@ describe("openLobby", () => {
       endsAt: 0,
     };
 
-    await openLobby("game_1", "2026-02-03T04:05:06.000Z", schedule);
+    await openLobby("game_1", Date.parse("2026-02-03T04:05:06.000Z"), schedule);
 
     expect(mocks.collection).toHaveBeenCalledWith("games");
     expect(update).toHaveBeenCalledWith("game_1", {

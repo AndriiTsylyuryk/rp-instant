@@ -1,14 +1,15 @@
 import type { Schedule } from "@rp/shared";
 import { pb, withPb } from "./pb.js";
+import { ClientResponseError } from "pocketbase";
 
 type GameRow = {
   id: string;
   club: string;
   title: string;
-  joinCode: string;
+  join_code: string;
   status: "draft" | "lobby" | "live" | "ended" | "cancelled";
   locale: "et" | "en";
-  startsAt: string;
+  starts_at: string;
   schedule: Schedule | null;
   joining_locked: boolean;
   sponsor_name: string | null;
@@ -36,10 +37,10 @@ function toGame(row: GameRow): Game {
     id: row.id,
     clubId: row.club,
     title: row.title,
-    code: row.joinCode,
+    code: row.join_code,
     status: row.status,
     locale: row.locale,
-    startsAt: row.startsAt ? new Date(row.startsAt).getTime() : null,
+    startsAt: row.starts_at ? new Date(row.starts_at).getTime() : null,
     schedule: row.schedule,
     joiningLocked: row.joining_locked,
     sponsor:
@@ -60,13 +61,13 @@ export async function getGameByCode(code: string): Promise<Game | null> {
       const row = await pb
         .collection("games")
         .getFirstListItem<GameRow>(
-          pb.filter("joinCode = {:code}", { code: code.toUpperCase() }),
+          pb.filter("join_code = {:code}", { code: code.toUpperCase() }),
           { sort: "-created" },
         );
       return toGame(row);
     });
   } catch (err) {
-    if (err instanceof Error && err.message.includes("No items found")) {
+    if (err instanceof ClientResponseError && err.status === 404) {
       return null;
     }
     throw err;
@@ -84,7 +85,7 @@ export async function getGameById(id: string): Promise<Game | null> {
       return toGame(row);
     });
   } catch (err) {
-    if (err instanceof Error && err.message.includes("No items found")) {
+    if (err instanceof ClientResponseError && err.status === 404) {
       return null;
     }
     throw err;
@@ -93,7 +94,7 @@ export async function getGameById(id: string): Promise<Game | null> {
 
 export function openLobby(
   id: string,
-  startsAt: string,
+  startsAt: number,
   schedule: Schedule,
 ): Promise<void> {
   return withPb(async () => {
