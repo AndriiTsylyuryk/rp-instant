@@ -2,6 +2,7 @@ import { randomBytes } from "crypto";
 import { base64 } from "zod";
 import { pb, withPb } from "./pb.js";
 import { ClientResponseError } from "pocketbase";
+import { error } from "console";
 
 type ParticipantRow = {
   id: string;
@@ -57,7 +58,7 @@ export async function createParticipant(
       pb.collection("participants").create<ParticipantRow>({
         game: gameId,
         nickname,
-        sessionToken,
+        session_token: sessionToken,
         score: 0,
         hidden: false,
       }),
@@ -69,4 +70,49 @@ export async function createParticipant(
     }
     throw err;
   }
+}
+
+export async function getParticipantByToken(
+  sessionToken: string,
+): Promise<Participant | null> {
+  try {
+    return await withPb(async () => {
+      const row = await pb
+        .collection("participants")
+        .getFirstListItem<ParticipantRow>(
+          pb.filter("session_token = {:t}", { t: sessionToken }),
+        );
+      return toParticipant(row);
+    });
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export function countParticipants(gameId: string): Promise<number> {
+  return withPb(async () => {
+    const res = await pb.collection("participants").getList(1, 1, {
+      filter: pb.filter("game = {:g} && hidden = false", { g: gameId }),
+      fields: "id",
+    });
+    return res.totalItems;
+  });
+}
+
+export function getLeaderboard(gameId: string, limit = 10) {
+  return withPb(async () => {
+    const res = await pb
+      .collection("participants")
+      .getList<ParticipantRow>(1, limit, {
+        filter: pb.filter("game = {:g} && hidden = false", { g: gameId }),
+        sort: "-score,created",
+        skipTotal: true,
+      });
+    return res.items.map((row, i) => ({
+      rank: i + 1,
+      nickname: row.nickname,
+      score: row.score ?? 0,
+    }));
+  });
 }
