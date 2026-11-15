@@ -1,4 +1,5 @@
 import type { Schedule } from "@rp/shared";
+import { pb, withPb } from "./pb.js";
 
 type GameRow = {
   id: string;
@@ -29,3 +30,95 @@ export type Game = {
     logoUrl: string | null;
   } | null;
 };
+
+function toGame(row: GameRow): Game {
+  return {
+    id: row.id,
+    clubId: row.club,
+    title: row.title,
+    code: row.joinCode,
+    status: row.status,
+    locale: row.locale,
+    startsAt: row.startsAt ? new Date(row.startsAt).getTime() : null,
+    schedule: row.schedule,
+    joiningLocked: row.joining_locked,
+    sponsor:
+      row.sponsor_name || row.sponsor_logo
+        ? {
+            name: row.sponsor_name,
+            logoUrl: row.sponsor_logo
+              ? `/api/files/games/${row.id}/${row.sponsor_logo}`
+              : null,
+          }
+        : null,
+  };
+}
+
+export async function getGameByCode(code: string): Promise<Game | null> {
+  try {
+    return await withPb(async () => {
+      const row = await pb
+        .collection("games")
+        .getFirstListItem<GameRow>(
+          pb.filter("joinCode = {:code}", { code: code.toUpperCase() }),
+          { sort: "-created" },
+        );
+      return toGame(row);
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("No items found")) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export async function getGameById(id: string): Promise<Game | null> {
+  try {
+    return await withPb(async () => {
+      const row = await pb
+        .collection("games")
+        .getFirstListItem<GameRow>(pb.filter("id = {:id}", { id: id }), {
+          sort: "-created",
+        });
+      return toGame(row);
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("No items found")) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+export function openLobby(
+  id: string,
+  startsAt: string,
+  schedule: Schedule,
+): Promise<void> {
+  return withPb(async () => {
+    await pb.collection("games").update(id, {
+      status: "lobby",
+      starts_at: new Date(startsAt).toISOString(),
+      schedule,
+    });
+  });
+}
+
+export function moveStartsAt(id: string, startsAt: string): Promise<void> {
+  return withPb(async () => {
+    await pb.collection("games").update(id, {
+      starts_at: new Date(startsAt).toISOString(),
+    });
+  });
+}
+
+export function saveFinalTop(id: string, top: unknown): Promise<void> {
+  return withPb(async () => {
+    await pb.collection("games").update(id, {
+      final_top: top,
+      ended_at: new Date().toISOString(),
+      status: "ended",
+    });
+  });
+}
