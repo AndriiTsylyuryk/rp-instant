@@ -10,6 +10,7 @@
     "test:live": "node scripts/live-test.mjs"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.5",
     "@rp/shared": "*",
     "fastify": "^5.12.7",
     "pocketbase": "^0.28.1",

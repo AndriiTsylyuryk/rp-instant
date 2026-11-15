@@ -1,18 +1,23 @@
 import Fastify from "fastify";
+import cookie from "@fastify/cookie";
+import { playRoutes } from "./routes/play.js";
 
 const app = Fastify({
   logger: true,
   trustProxy: true,
-  bodyLimit: 64 * 1024,
 });
 
-app.get("/api/health", async () => {
-  return { ok: true };
-});
+await app.register(cookie);
+await app.register(playRoutes, { prefix: "/api" });
 
-app.get("/api/time", async () => {
-  return { now: Date.now() };
-});
+app.get("/api/health", async () => ({ ok: true }));
 
-const port = Number(process.env.PORT) || 3000;
-await app.listen({ port, host: "0.0.0.0" });
+const port = Number(process.env.PORT ?? 3000);
+const host = process.env.HOST ?? "127.0.0.1";
+
+try {
+  await app.listen({ port, host });
+} catch (err) {
+  app.log.error(err);
+  process.exit(1);
+}
