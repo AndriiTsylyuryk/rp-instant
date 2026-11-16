@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
+import { ANSWER_GRACE_MS, buildSchedule, STARTING_BUFFER_MS } from "@rp/shared";
 
 const mocks = vi.hoisted(() => ({
   getCachedGameByCode: vi.fn(),
@@ -9,11 +10,21 @@ const mocks = vi.hoisted(() => ({
   createParticipant: vi.fn(),
   getParticipantByToken: vi.fn(),
   getLeaderboard: vi.fn(),
+  createAnswer: vi.fn(),
+  getAnswersByParticipant: vi.fn(),
+  getCachedQuestions: vi.fn(),
+  getCachedQuestionAt: vi.fn(),
+  getCachedCounts: vi.fn(),
 }));
 
 vi.mock("../src/repo/games.js", () => ({}));
 
-vi.mock("../src/game-cashe.js", () => ({
+vi.mock("../src/repo/pb.js", () => ({
+  pb: {},
+  withPb: (fn: (client: unknown) => Promise<unknown>) => fn({}),
+}));
+
+vi.mock("../src/game-cache.js", () => ({
   getCachedGameByCode: mocks.getCachedGameByCode,
   getCachedGameById: mocks.getCachedGameById,
 }));
@@ -25,8 +36,35 @@ vi.mock("../src/repo/participants.js", () => ({
   getLeaderboard: mocks.getLeaderboard,
 }));
 
+vi.mock("../src/repo/answers.js", () => ({
+  createAnswer: mocks.createAnswer,
+  getAnswersByParticipant: mocks.getAnswersByParticipant,
+}));
+
+vi.mock("../src/questions-cache.js", () => ({
+  getCachedQuestions: mocks.getCachedQuestions,
+  getCachedQuestionAt: mocks.getCachedQuestionAt,
+}));
+
+vi.mock("../src/reveal-cache.js", () => ({
+  getCachedCounts: mocks.getCachedCounts,
+}));
+
 import { playRoutes } from "../src/routes/play.js";
 import type { Game } from "../src/repo/games.js";
+
+const BASE = Date.parse("2026-01-01T12:00:00.000Z");
+const PLAY_COOKIE = "rp_play=token_1";
+
+type Question = {
+  id: string;
+  index: number;
+  kind: "quiz" | "promo";
+  text: string;
+  options: string[];
+  correctOption: number | null;
+  doublePoints: boolean;
+};
 
 let app: FastifyInstance;
 
@@ -58,8 +96,86 @@ function makeParticipant(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeQuestion(overrides: Partial<Question> = {}): Question {
+  return {
+    id: "question_1",
+    index: 0,
+    kind: "quiz",
+    text: "Who wins?",
+    options: ["A", "B"],
+    correctOption: 1,
+    doublePoints: false,
+    ...overrides,
+  };
+}
+
+function useTime(now: number = BASE) {
+  vi.spyOn(Date, "now").mockReturnValue(now);
+}
+
+function liveGame(
+  elapsedMs: number,
+  kinds: Array<{ kind: "quiz" | "promo" }> = [{ kind: "quiz" }],
+): Game {
+  const schedule = buildSchedule(kinds);
+  return makeGame({
+    status: "live",
+    startsAt: BASE - elapsedMs,
+    schedule,
+  });
+}
+
+function answer(
+  payload: Record<string, unknown>,
+  cookieHeader: string | null = PLAY_COOKIE,
+) {
+  return app.inject({
+    method: "POST",
+    url: "/api/play/answer",
+    payload,
+    headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+  });
+}
+
+function setupOpenQuestion(
+  overrides: { elapsedMs?: number; question?: Partial<Question> } = {},
+) {
+  const schedule = buildSchedule([{ kind: "quiz" }]);
+  const elapsedMs =
+    overrides.elapsedMs ?? schedule.questions[0].opensAt + 2000;
+  const game = makeGame({
+    status: "live",
+    startsAt: BASE - elapsedMs,
+    schedule,
+  });
+
+  useTime(BASE);
+  mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+  mocks.getCachedGameById.mockResolvedValue(game);
+  mocks.getCachedQuestionAt.mockResolvedValue(
+    makeQuestion(overrides.question),
+  );
+  mocks.createAnswer.mockResolvedValue({
+    ok: true,
+    answer: {
+      id: "answer_1",
+      questionId: "question_1",
+      option: 1,
+      elapsedMs: 2000,
+      isCorrect: true,
+      points: 900,
+    },
+  });
+
+  return { game, schedule };
+}
+
 beforeEach(async () => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  mocks.countParticipants.mockResolvedValue(0);
+  mocks.getAnswersByParticipant.mockResolvedValue([]);
+  mocks.getCachedQuestions.mockResolvedValue([]);
+
   app = Fastify();
   await app.register(cookie);
   await app.register(playRoutes, { prefix: "/api" });
@@ -67,6 +183,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await app.close();
 });
 
@@ -118,6 +235,8 @@ describe("GET /api/game/state", () => {
       phase: { type: "lobby" },
       nextBoundaryAt: null,
       players: 3,
+      question: null,
+      reveal: null,
       game: {
         id: "game_1",
         title: "Derby",
@@ -127,6 +246,89 @@ describe("GET /api/game/state", () => {
         sponsor: null,
       },
     });
+  });
+
+  it("returns the current question during a question phase", async () => {
+    useTime(BASE);
+    mocks.getCachedGameByCode.mockResolvedValue(
+      liveGame(STARTING_BUFFER_MS + 2000),
+    );
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/game/state?code=ABC123",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.getCachedQuestionAt).toHaveBeenCalledWith("game_1", 0);
+    expect(res.json()).toMatchObject({
+      phase: { type: "question", index: 0 },
+      question: {
+        index: 0,
+        kind: "quiz",
+        text: "Who wins?",
+        options: ["A", "B"],
+        doublePoints: false,
+      },
+      reveal: null,
+    });
+  });
+
+  it("returns a reveal without counts during the answer grace window", async () => {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    const elapsed = schedule.questions[0].closesAt + 100;
+    useTime(BASE);
+    mocks.getCachedGameByCode.mockResolvedValue(liveGame(elapsed));
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/game/state?code=ABC123",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      phase: { type: "pause", index: 0 },
+      reveal: { index: 0, correctOption: 1, counts: null },
+    });
+    expect(mocks.getCachedCounts).not.toHaveBeenCalled();
+  });
+
+  it("returns option counts once the answer grace window has passed", async () => {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    const elapsed = schedule.questions[0].closesAt + ANSWER_GRACE_MS;
+    useTime(BASE);
+    mocks.getCachedGameByCode.mockResolvedValue(liveGame(elapsed));
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+    mocks.getCachedCounts.mockResolvedValue([3, 4]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/game/state?code=ABC123",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.getCachedCounts).toHaveBeenCalledWith("question_1", 2);
+    expect(res.json()).toMatchObject({
+      phase: { type: "pause", index: 0 },
+      reveal: { index: 0, correctOption: 1, counts: [3, 4] },
+    });
+  });
+
+  it("returns a null question when the question is missing", async () => {
+    useTime(BASE);
+    mocks.getCachedGameByCode.mockResolvedValue(
+      liveGame(STARTING_BUFFER_MS + 2000),
+    );
+    mocks.getCachedQuestionAt.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/game/state?code=ABC123",
+    });
+
+    expect(res.json()).toMatchObject({ question: null, reveal: null });
   });
 });
 
@@ -184,7 +386,7 @@ describe("POST /api/join", () => {
 
     const res = await join(
       { code: "ABC123", nickname: "player" },
-      "pr_play=token_1",
+      "rp_play=token_1",
     );
 
     expect(res.statusCode).toBe(200);
@@ -208,7 +410,7 @@ describe("POST /api/join", () => {
 
     const res = await join(
       { code: "ABC123", nickname: "player" },
-      "pr_play=token_1",
+      "rp_play=token_1",
     );
 
     expect(res.statusCode).toBe(200);
@@ -243,7 +445,7 @@ describe("POST /api/join", () => {
     expect(res.json()).toEqual({
       me: { id: "participant_1", nickname: "neo", score: 0 },
     });
-    expect(res.headers["set-cookie"]).toContain("pr_play=new_token");
+    expect(res.headers["set-cookie"]).toContain("rp_play=new_token");
   });
 });
 
@@ -261,12 +463,12 @@ describe("GET /api/play/state", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/play/state",
-      headers: { cookie: "pr_play=stale" },
+      headers: { cookie: "rp_play=stale" },
     });
 
     expect(res.statusCode).toBe(401);
     expect(res.json()).toEqual({ error: "no_session" });
-    expect(res.headers["set-cookie"]).toContain("pr_play=");
+    expect(res.headers["set-cookie"]).toContain("rp_play=");
   });
 
   it("returns not_found when the participant game is missing", async () => {
@@ -276,7 +478,7 @@ describe("GET /api/play/state", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/play/state",
-      headers: { cookie: "pr_play=token_1" },
+      headers: { cookie: PLAY_COOKIE },
     });
 
     expect(res.statusCode).toBe(404);
@@ -293,7 +495,7 @@ describe("GET /api/play/state", () => {
     const res = await app.inject({
       method: "GET",
       url: "/api/play/state",
-      headers: { cookie: "pr_play=token_1" },
+      headers: { cookie: PLAY_COOKIE },
     });
 
     expect(res.statusCode).toBe(200);
@@ -305,6 +507,8 @@ describe("GET /api/play/state", () => {
       phase: { type: "lobby" },
       nextBoundaryAt: null,
       players: 2,
+      question: null,
+      reveal: null,
       game: {
         id: "game_1",
         title: "Derby",
@@ -314,7 +518,307 @@ describe("GET /api/play/state", () => {
         sponsor: null,
       },
       me: { id: "participant_1", nickname: "neo", score: 5 },
+      answered: [],
       top: [{ rank: 1, nickname: "neo", score: 5 }],
     });
+  });
+
+  it("maps stored answers to question indexes and drops unknown questions", async () => {
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(makeGame());
+    mocks.getCachedQuestions.mockResolvedValue([
+      makeQuestion({ id: "q0", index: 0 }),
+      makeQuestion({ id: "q1", index: 1 }),
+    ]);
+    mocks.getAnswersByParticipant.mockResolvedValue([
+      {
+        id: "answer_1",
+        questionId: "q1",
+        option: 1,
+        elapsedMs: 1200,
+        isCorrect: true,
+        points: 940,
+      },
+      {
+        id: "answer_2",
+        questionId: "removed_question",
+        option: 0,
+        elapsedMs: 500,
+        isCorrect: false,
+        points: 0,
+      },
+    ]);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/play/state",
+      headers: { cookie: PLAY_COOKIE },
+    });
+
+    expect(mocks.getAnswersByParticipant).toHaveBeenCalledWith(
+      "participant_1",
+    );
+    expect(mocks.getCachedQuestions).toHaveBeenCalledWith("game_1");
+    expect(res.json().answered).toEqual([
+      { index: 1, option: 1, isCorrect: true, points: 940 },
+    ]);
+  });
+
+  it("includes the current question during a question phase", async () => {
+    useTime(BASE);
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(
+      liveGame(STARTING_BUFFER_MS + 2000),
+    );
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/play/state",
+      headers: { cookie: PLAY_COOKIE },
+    });
+
+    expect(res.json()).toMatchObject({
+      phase: { type: "question", index: 0 },
+      question: { index: 0, text: "Who wins?" },
+      reveal: null,
+    });
+  });
+});
+
+describe("POST /api/play/answer", () => {
+  it("returns no_session without a cookie", async () => {
+    const res = await answer({ index: 0, option: 1 }, null);
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "no_session" });
+  });
+
+  it("clears the cookie and returns no_session for a stale token", async () => {
+    mocks.getParticipantByToken.mockResolvedValue(null);
+
+    const res = await answer({ index: 0, option: 1 }, "rp_play=stale");
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "no_session" });
+    expect(res.headers["set-cookie"]).toContain("rp_play=");
+  });
+
+  it("returns not_found when the game is missing", async () => {
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(null);
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "not_found" });
+  });
+
+  it("returns not_found when the game has no schedule yet", async () => {
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(
+      makeGame({ status: "live", startsAt: BASE }),
+    );
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("rejects non-integer or negative indexes and options", async () => {
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(
+      liveGame(STARTING_BUFFER_MS + 2000),
+    );
+
+    for (const payload of [
+      { option: 1 },
+      { index: 0.5, option: 1 },
+      { index: 0, option: -1 },
+      { index: "0", option: 1 },
+      { index: 0, option: "1" },
+    ]) {
+      const res = await answer(payload);
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toEqual({ error: "bad_request" });
+    }
+  });
+
+  it("returns closed during get-ready", async () => {
+    useTime(BASE);
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(liveGame(0));
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "closed" });
+    expect(mocks.getCachedQuestionAt).not.toHaveBeenCalled();
+  });
+
+  it("accepts answers during the grace window after closing", async () => {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    const elapsed = schedule.questions[0].closesAt + 100;
+    const game = makeGame({
+      status: "live",
+      startsAt: BASE - elapsed,
+      schedule,
+    });
+    useTime(BASE);
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(game);
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+    mocks.createAnswer.mockResolvedValue({
+      ok: true,
+      answer: {
+        id: "answer_1",
+        questionId: "question_1",
+        option: 1,
+        elapsedMs: 10100,
+        isCorrect: true,
+        points: 500,
+      },
+    });
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.createAnswer).toHaveBeenCalledWith({
+      gameId: "game_1",
+      participantId: "participant_1",
+      questionId: "question_1",
+      option: 1,
+      elapsedMs: 10100,
+      isCorrect: true,
+      points: 500,
+    });
+    expect(res.json()).toEqual({ isCorrect: true, points: 500, total: 505 });
+  });
+
+  it("returns closed once the grace window has passed", async () => {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    const elapsed =
+      schedule.questions[0].closesAt + ANSWER_GRACE_MS + 1;
+    useTime(BASE);
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+    mocks.getCachedGameById.mockResolvedValue(
+      makeGame({
+        status: "live",
+        startsAt: BASE - elapsed,
+        schedule,
+      }),
+    );
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "closed" });
+  });
+
+  it("returns wrong_question for an index other than the open one", async () => {
+    setupOpenQuestion();
+
+    const res = await answer({ index: 1, option: 1 });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "wrong_question" });
+    expect(mocks.getCachedQuestionAt).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found when the open question is missing", async () => {
+    setupOpenQuestion();
+    mocks.getCachedQuestionAt.mockResolvedValue(null);
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "not_found" });
+  });
+
+  it("rejects an option outside the question options", async () => {
+    setupOpenQuestion();
+
+    const res = await answer({ index: 0, option: 2 });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "bad_option" });
+    expect(mocks.createAnswer).not.toHaveBeenCalled();
+  });
+
+  it("scores a correct answer and returns the new total", async () => {
+    setupOpenQuestion();
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.createAnswer).toHaveBeenCalledWith({
+      gameId: "game_1",
+      participantId: "participant_1",
+      questionId: "question_1",
+      option: 1,
+      elapsedMs: 2000,
+      isCorrect: true,
+      points: 900,
+    });
+    expect(res.json()).toEqual({ isCorrect: true, points: 900, total: 905 });
+  });
+
+  it("scores a wrong answer with zero points", async () => {
+    setupOpenQuestion();
+    mocks.createAnswer.mockResolvedValue({
+      ok: true,
+      answer: {
+        id: "answer_1",
+        questionId: "question_1",
+        option: 0,
+        elapsedMs: 2000,
+        isCorrect: false,
+        points: 0,
+      },
+    });
+
+    const res = await answer({ index: 0, option: 0 });
+
+    expect(mocks.createAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ option: 0, isCorrect: false, points: 0 }),
+    );
+    expect(res.json()).toEqual({ isCorrect: false, points: 0, total: 5 });
+  });
+
+  it("uses promo scoring for a promo question", async () => {
+    setupOpenQuestion({
+      question: { kind: "promo", correctOption: null, doublePoints: false },
+    });
+    mocks.createAnswer.mockResolvedValue({
+      ok: true,
+      answer: {
+        id: "answer_1",
+        questionId: "question_1",
+        option: 0,
+        elapsedMs: 2000,
+        isCorrect: false,
+        points: 0,
+      },
+    });
+
+    const res = await answer({ index: 0, option: 0 });
+
+    expect(mocks.createAnswer).toHaveBeenCalledWith(
+      expect.objectContaining({ isCorrect: false, points: 0 }),
+    );
+    expect(res.json()).toEqual({ isCorrect: false, points: 0, total: 5 });
+  });
+
+  it("returns conflict when the question was already answered", async () => {
+    setupOpenQuestion();
+    mocks.createAnswer.mockResolvedValue({
+      ok: false,
+      reason: "already_answered",
+    });
+
+    const res = await answer({ index: 0, option: 1 });
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "already_answered" });
   });
 });

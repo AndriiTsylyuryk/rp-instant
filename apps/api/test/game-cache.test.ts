@@ -11,7 +11,7 @@ vi.mock("../src/repo/games.js", () => ({
   getGameById: mocks.getGameById,
 }));
 
-type CacheModule = typeof import("../src/game-cashe.js");
+type CacheModule = typeof import("../src/game-cache.js");
 
 const TTL_MS = 2000;
 const NEGATIVE_TTL_MS = 5000;
@@ -40,7 +40,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(BASE_TIME);
-  cache = await import("../src/game-cashe.js");
+  cache = await import("../src/game-cache.js");
 });
 
 afterEach(() => {

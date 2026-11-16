@@ -1,3 +1,6 @@
+import type { FastifyInstance } from "fastify";
+import type {} from "@fastify/cookie";
+import { ANSWER_GRACE_MS, scoreAnswer } from "@rp/shared";
 import { Game } from "../repo/games.js";
 import {
   countParticipants,
@@ -5,26 +8,125 @@ import {
   getLeaderboard,
   getParticipantByToken,
 } from "../repo/participants.js";
-import { computeState } from "../state.js";
-import { FastifyInstance } from "fastify";
-import { getCachedGameByCode, getCachedGameById } from "../game-cashe.js";
-import type {} from "@fastify/cookie";
+import { createAnswer, getAnswersByParticipant } from "../repo/answers.js";
+import { isCorrectOption, toPublicQuestion } from "../repo/questions.js";
+import { getCachedQuestionAt, getCachedQuestions } from "../questions-cache.js";
+import { getCachedCounts } from "../reveal-cache.js";
+import { getCachedGameByCode, getCachedGameById } from "../game-cache.js";
+import { computeState, type StateSlice } from "../state.js";
 
-const PLAY_COOKIE = "pr_play";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; //30days
-const COOKIE_SECURE = process.env.NODE_END === "production";
+const PLAY_COOKIE = "rp_play";
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const COOKIE_SECURE = process.env.NODE_ENV === "production";
 
 const NICK_MIN = 5;
 const NICK_MAX = 20;
 
-async function publicState(game: Game) {
-  const now = Date.now();
+type LivePhase = Exclude<StateSlice["phase"], string>;
+
+function isLive(phase: StateSlice["phase"]): phase is LivePhase {
+  return typeof phase !== "string";
+}
+
+function readCode(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLocaleUpperCase() : "";
+}
+
+function readInt(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function openQuestionIndex(
+  game: Game,
+  phase: StateSlice["phase"],
+  now: number,
+): number | null {
+  if (!isLive(phase) || game.startsAt === null || game.schedule === null) {
+    return null;
+  }
+  if (phase.type === "question") {
+    return phase.index;
+  }
+  if (phase.type === "pause") {
+    const item = game.schedule.questions[phase.index];
+    const closesAt = game.startsAt + item.closesAt;
+    return now - closesAt <= ANSWER_GRACE_MS ? phase.index : null;
+  }
+  return null;
+}
+
+async function questionSlice(
+  game: Game,
+  phase: StateSlice["phase"],
+  now: number,
+) {
+  if (!isLive(phase) || game.startsAt === null || game.schedule === null) {
+    return { question: null, reveal: null };
+  }
+
+  if (phase.type === "question") {
+    const question = await getCachedQuestionAt(game.id, phase.index);
+    return {
+      question: question ? toPublicQuestion(question) : null,
+      reveal: null,
+    };
+  }
+
+  if (phase.type === "pause") {
+    const question = await getCachedQuestionAt(game.id, phase.index);
+    if (!question) {
+      return { question: null, reveal: null };
+    }
+
+    const item = game.schedule.questions[phase.index];
+    const settledAt = game.startsAt + item.closesAt + ANSWER_GRACE_MS;
+    const counts =
+      now >= settledAt
+        ? await getCachedCounts(question.id, question.options.length)
+        : null;
+
+    return {
+      question: toPublicQuestion(question),
+      reveal: {
+        index: question.index,
+        correctOption: question.correctOption,
+        counts,
+      },
+    };
+  }
+
+  return { question: null, reveal: null };
+}
+
+async function answeredSlice(gameId: string, participantId: string) {
+  const [answers, questions] = await Promise.all([
+    getAnswersByParticipant(participantId),
+    getCachedQuestions(gameId),
+  ]);
+
+  const indexById = new Map(questions.map((q) => [q.id, q.index]));
+
+  return answers
+    .map((answer) => ({
+      index: indexById.get(answer.questionId) ?? -1,
+      option: answer.option,
+      isCorrect: answer.isCorrect,
+      points: answer.points,
+    }))
+    .filter((answer) => answer.index >= 0);
+}
+
+async function publicState(game: Game, now: number) {
   const { phase, nextBoundaryAt } = computeState(game, now);
+  const slice = await questionSlice(game, phase, now);
+
   return {
     serverNow: now,
     phase,
     nextBoundaryAt,
     players: await countParticipants(game.id),
+    question: slice.question,
+    reveal: slice.reveal,
     game: {
       id: game.id,
       title: game.title,
@@ -35,24 +137,21 @@ async function publicState(game: Game) {
     },
   };
 }
-
-function readCode(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLocaleUpperCase() : "";
-}
-
 export async function playRoutes(app: FastifyInstance) {
   app.get("/game/state", async (req, reply) => {
-    reply.header("cache-control", "no-store");
+    reply.header("Cache-Control", "no-store");
 
     const code = readCode((req.query as Record<string, unknown>).code);
     if (code.length < 6) {
       return reply.code(404).send({ error: "not_found" });
     }
+
     const game = await getCachedGameByCode(code);
     if (!game || game.status === "draft") {
       return reply.code(404).send({ error: "not_found" });
     }
-    return publicState(game);
+
+    return publicState(game, Date.now());
   });
 
   app.post("/join", async (req, reply) => {
@@ -135,11 +234,85 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: "not_found" });
     }
 
-    const base = await publicState(game);
+    const base = await publicState(game, Date.now());
+
     return {
       ...base,
       me: { id: me.id, nickname: me.nickname, score: me.score },
+      answered: await answeredSlice(game.id, me.id),
       top: await getLeaderboard(game.id, 10),
+    };
+  });
+
+  app.post("/play/answer", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+
+    const token = req.cookies[PLAY_COOKIE];
+    if (!token) {
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    const me = await getParticipantByToken(token);
+    if (!me) {
+      reply.clearCookie(PLAY_COOKIE, { path: "/api" });
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    const game = await getCachedGameById(me.gameId);
+    if (!game || game.schedule === null || game.startsAt === null) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const index = readInt(body.index);
+    const option = readInt(body.option);
+    if (index === null || option === null || option < 0) {
+      return reply.code(400).send({ error: "bad_request" });
+    }
+
+    const now = Date.now();
+    const { phase } = computeState(game, now);
+    const openIndex = openQuestionIndex(game, phase, now);
+    if (openIndex === null) {
+      return reply.code(409).send({ error: "closed" });
+    }
+    if (openIndex !== index) {
+      return reply.code(409).send({ error: "wrong_question" });
+    }
+
+    const question = await getCachedQuestionAt(game.id, openIndex);
+    if (!question) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (option >= question.options.length) {
+      return reply.code(400).send({ error: "bad_option" });
+    }
+
+    const item = game.schedule.questions[openIndex];
+    const elapsedMs = Math.max(0, now - game.startsAt - item.opensAt);
+    const limitMs = item.closesAt - item.opensAt;
+
+    const isCorrect = isCorrectOption(question, option);
+    const points = scoreAnswer(question, isCorrect, elapsedMs, limitMs);
+
+    const result = await createAnswer({
+      gameId: game.id,
+      participantId: me.id,
+      questionId: question.id,
+      option,
+      elapsedMs,
+      isCorrect,
+      points,
+    });
+
+    if (!result.ok) {
+      return reply.code(409).send({ error: result.reason });
+    }
+
+    return {
+      isCorrect,
+      points,
+      total: me.score + points,
     };
   });
 }
