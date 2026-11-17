@@ -3,9 +3,7 @@ import type {} from "@fastify/cookie";
 import { ANSWER_GRACE_MS, scoreAnswer } from "@rp/shared";
 import { Game } from "../repo/games.js";
 import {
-  countParticipants,
   createParticipant,
-  getLeaderboard,
   getParticipantByToken,
 } from "../repo/participants.js";
 import { createAnswer, getAnswersByParticipant } from "../repo/answers.js";
@@ -13,6 +11,9 @@ import { isCorrectOption, toPublicQuestion } from "../repo/questions.js";
 import { getCachedQuestionAt, getCachedQuestions } from "../questions-cache.js";
 import { getCachedCounts } from "../reveal-cache.js";
 import { getCachedGameByCode, getCachedGameById } from "../game-cache.js";
+import { getSession, invalidateSession, putSession } from "../session-cache.js";
+import { getPlayerCount, incrementPlayerCount } from "../player-count.js";
+import { getBoard, rankOf } from "../leaderboard-cache.js";
 import { computeState, type StateSlice } from "../state.js";
 
 const PLAY_COOKIE = "rp_play";
@@ -124,7 +125,7 @@ async function publicState(game: Game, now: number) {
     serverNow: now,
     phase,
     nextBoundaryAt,
-    players: await countParticipants(game.id),
+    players: await getPlayerCount(game.id),
     question: slice.question,
     reveal: slice.reveal,
     game: {
@@ -198,6 +199,15 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: result.reason });
     }
 
+    putSession(result.sessionToken, {
+      id: result.participant.id,
+      gameId: game.id,
+      nickname: result.participant.nickname,
+      fanId: null,
+      score: 0,
+    });
+    incrementPlayerCount(game.id);
+
     reply.setCookie(PLAY_COOKIE, result.sessionToken, {
       path: "/api",
       httpOnly: true,
@@ -223,8 +233,9 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: "no_session" });
     }
 
-    const me = await getParticipantByToken(token);
+    const me = await getSession(token);
     if (!me) {
+      invalidateSession(token);
       reply.clearCookie(PLAY_COOKIE, { path: "/api" });
       return reply.code(401).send({ error: "no_session" });
     }
@@ -235,13 +246,34 @@ export async function playRoutes(app: FastifyInstance) {
     }
 
     const base = await publicState(game, Date.now());
+    const board = await getBoard(game.id);
 
     return {
       ...base,
-      me: { id: me.id, nickname: me.nickname, score: me.score },
-      answered: await answeredSlice(game.id, me.id),
-      top: await getLeaderboard(game.id, 10),
+      me: {
+        id: me.id,
+        nickname: me.nickname,
+        score: me.score,
+        rank: rankOf(board, me.score),
+      },
+      top: board.top,
     };
+  });
+
+  app.get("/play/history", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+
+    const token = req.cookies[PLAY_COOKIE];
+    if (!token) {
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    const me = await getSession(token);
+    if (!me) {
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    return { answered: await answeredSlice(me.gameId, me.id) };
   });
 
   app.post("/play/answer", async (req, reply) => {
@@ -252,7 +284,7 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: "no_session" });
     }
 
-    const me = await getParticipantByToken(token);
+    const me = await getSession(token);
     if (!me) {
       reply.clearCookie(PLAY_COOKIE, { path: "/api" });
       return reply.code(401).send({ error: "no_session" });
@@ -309,10 +341,12 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: result.reason });
     }
 
+    me.score += points;
+
     return {
       isCorrect,
       points,
-      total: me.score + points,
+      total: me.score,
     };
   });
 }

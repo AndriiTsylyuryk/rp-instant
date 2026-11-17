@@ -19,12 +19,14 @@ import {
   createParticipant,
   getLeaderboard,
   getParticipantByToken,
+  getScoreboard,
   newSessionToken,
 } from "../src/repo/participants.js";
 
 const create = vi.fn();
 const getFirstListItem = vi.fn();
 const getList = vi.fn();
+const getFullList = vi.fn();
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -43,7 +45,12 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.filter.mockReturnValue("FILTER");
-  mocks.collection.mockReturnValue({ create, getFirstListItem, getList });
+  mocks.collection.mockReturnValue({
+    create,
+    getFirstListItem,
+    getList,
+    getFullList,
+  });
 });
 
 describe("newSessionToken", () => {
@@ -225,5 +232,44 @@ describe("getLeaderboard", () => {
     getList.mockResolvedValue({ items: [] });
 
     await expect(getLeaderboard("game_1")).resolves.toEqual([]);
+  });
+});
+
+describe("getScoreboard", () => {
+  it("returns all visible participants sorted by score and creation time", async () => {
+    getFullList.mockResolvedValue([
+      makeRow({ nickname: "neo", score: 30 }),
+      makeRow({ nickname: "trinity", score: 20 }),
+    ]);
+
+    const board = await getScoreboard("game_1");
+
+    expect(mocks.filter).toHaveBeenCalledWith(
+      "game = {:gameId} && hidden != true",
+      { gameId: "game_1" },
+    );
+    expect(getFullList).toHaveBeenCalledWith({
+      filter: "FILTER",
+      sort: "-score,created",
+      fields: "nickname,score",
+    });
+    expect(board).toEqual([
+      { nickname: "neo", score: 30 },
+      { nickname: "trinity", score: 20 },
+    ]);
+  });
+
+  it("falls back to zero score for rows without score", async () => {
+    getFullList.mockResolvedValue([makeRow({ score: null })]);
+
+    await expect(getScoreboard("game_1")).resolves.toEqual([
+      { nickname: "neo", score: 0 },
+    ]);
+  });
+
+  it("returns an empty board when there are no participants", async () => {
+    getFullList.mockResolvedValue([]);
+
+    await expect(getScoreboard("game_1")).resolves.toEqual([]);
   });
 });

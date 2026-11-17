@@ -1,8 +1,6 @@
 import { randomBytes } from "crypto";
-import { base64 } from "zod";
 import { pb, withPb } from "./pb.js";
 import { ClientResponseError } from "pocketbase";
-import { error } from "console";
 
 type ParticipantRow = {
   id: string;
@@ -111,6 +109,25 @@ export function getLeaderboard(gameId: string, limit = 10) {
       });
     return res.items.map((row, i) => ({
       rank: i + 1,
+      nickname: row.nickname,
+      score: row.score ?? 0,
+    }));
+  });
+}
+
+export function getScoreboard(
+  gameId: string,
+): Promise<Array<{ nickname: string; score: number }>> {
+  return withPb(async () => {
+    const rows = await pb
+      .collection("participants")
+      .getFullList<ParticipantRow>({
+        filter: pb.filter("game = {:gameId} && hidden != true", { gameId }),
+        sort: "-score,created",
+        fields: "nickname,score",
+      });
+
+    return rows.map((row) => ({
       nickname: row.nickname,
       score: row.score ?? 0,
     }));
