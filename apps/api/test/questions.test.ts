@@ -32,7 +32,7 @@ type QuestionRow = {
   text: string;
   options: unknown;
   correct_option: number | null;
-  points_multiplier: number | null;
+  double_points: boolean | null;
 };
 
 function makeQuiz(overrides: Partial<QuizRow> = {}): QuizRow {
@@ -48,7 +48,7 @@ function makeQuestion(overrides: Partial<QuestionRow> = {}): QuestionRow {
     text: "Who wins?",
     options: ["A", "B"],
     correct_option: 0,
-    points_multiplier: null,
+    double_points: null,
     ...overrides,
   };
 }
@@ -97,6 +97,9 @@ describe("getQuestionsForGame", () => {
     expect(questionsGetFullList).toHaveBeenCalledWith({
       filter: "FILTER",
       sort: "position, created",
+    });
+    expect(mocks.filter).toHaveBeenNthCalledWith(2, "quiz.game = {:gameId}", {
+      gameId: "game_1",
     });
   });
 
@@ -160,7 +163,7 @@ describe("getQuestionsForGame", () => {
         kind: "quiz",
         options: ["Yes", "No"],
         correct_option: 1,
-        points_multiplier: 2,
+        double_points: true,
       }),
       makeQuestion({
         id: "promo_q",
@@ -169,7 +172,7 @@ describe("getQuestionsForGame", () => {
         text: "Sponsor",
         options: null,
         correct_option: null,
-        points_multiplier: 1,
+        double_points: false,
       }),
       makeQuestion({
         id: "blank_kind_q",

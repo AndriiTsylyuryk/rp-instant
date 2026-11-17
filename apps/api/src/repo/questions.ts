@@ -14,7 +14,7 @@ type QuestionRow = {
   text: string;
   options: unknown;
   correct_option: number | null;
-  points_multiplier: number | null;
+  double_points: boolean | null;
 };
 
 export type Question = {
@@ -40,7 +40,7 @@ function toQuestion(row: QuestionRow, index: number): Question {
     options: toOptions(row.options),
     correctOption:
       typeof row.correct_option === "number" ? row.correct_option : null,
-    doublePoints: (row.points_multiplier ?? 1) > 1,
+    doublePoints: row.double_points ?? false,
   };
 }
 
@@ -57,7 +57,7 @@ export function getQuestionsForGame(gameId: string): Promise<Question[]> {
     const rows = await pb
       .collection("quiz_questions")
       .getFullList<QuestionRow>({
-        filter: pb.filter("game= {:gameId}", { gameId }),
+        filter: pb.filter("quiz.game = {:gameId}", { gameId }),
         sort: "position, created",
       });
 

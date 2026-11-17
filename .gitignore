@@ -3,3 +3,5 @@ dist
 .env
 data/
 *.log
+load/game.js
+load/results.json

@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test": "vitest run",
-    "test:live": "node scripts/live-test.mjs"
+    "test:live": "node scripts/live-test.mjs",
+    "seed:load": "tsx --env-file-if-exists=../../.env scripts/seed-load.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
