@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import cookie from "@fastify/cookie";
-import { ANSWER_GRACE_MS, buildSchedule, STARTING_BUFFER_MS } from "@rp/shared";
+import {
+  ANSWER_GRACE_MS,
+  buildSchedule,
+  PREFETCH_MS,
+  STARTING_BUFFER_MS,
+} from "@rp/shared";
 
 const mocks = vi.hoisted(() => ({
   getCachedGameByCode: vi.fn(),
@@ -270,6 +275,7 @@ describe("GET /api/game/state", () => {
       players: 3,
       question: null,
       reveal: null,
+      nextQuestion: null,
       game: {
         id: "game_1",
         title: "Derby",
@@ -279,6 +285,34 @@ describe("GET /api/game/state", () => {
         sponsor: null,
       },
     });
+  });
+
+  it("prefetches the next question inside the prefetch window", async () => {
+    useTime(BASE);
+    const schedule = buildSchedule([{ kind: "quiz" }, { kind: "quiz" }]);
+    const elapsedMs = schedule.questions[0].opensAt - PREFETCH_MS / 2;
+    mocks.getCachedGameByCode.mockResolvedValue(
+      liveGame(elapsedMs, [
+        { kind: "quiz" },
+        { kind: "quiz" },
+      ]),
+    );
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/game/state?code=ABC123",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().nextQuestion).toEqual({
+      index: 0,
+      kind: "quiz",
+      text: "Who wins?",
+      options: ["A", "B"],
+      doublePoints: false,
+    });
+    expect(mocks.getCachedQuestionAt).toHaveBeenCalledWith("game_1", 0);
   });
 
   it("returns the current question during a question phase", async () => {
@@ -559,6 +593,7 @@ describe("GET /api/play/state", () => {
       players: 2,
       question: null,
       reveal: null,
+      nextQuestion: null,
       game: {
         id: "game_1",
         title: "Derby",

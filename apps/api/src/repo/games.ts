@@ -124,3 +124,11 @@ export function saveFinalTop(id: string, top: unknown): Promise<void> {
   });
 }
 
+export function setGameStatus(
+  id: string,
+  status: Game["status"],
+): Promise<void> {
+  return withPb(async () => {
+    await pb.collection("games").update(id, { status });
+  });
+}

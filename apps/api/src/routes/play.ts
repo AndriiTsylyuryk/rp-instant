@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type {} from "@fastify/cookie";
-import { ANSWER_GRACE_MS, scoreAnswer } from "@rp/shared";
+import { ANSWER_GRACE_MS, PREFETCH_MS, scoreAnswer } from "@rp/shared";
 import { Game } from "../repo/games.js";
 import {
   createParticipant,
@@ -15,6 +15,7 @@ import { getSession, invalidateSession, putSession } from "../session-cache.js";
 import { getPlayerCount, incrementPlayerCount } from "../player-count.js";
 import { getBoard, rankOf } from "../leaderboard-cache.js";
 import { computeState, type StateSlice } from "../state.js";
+import { reconcileStatus } from "../transitions.js";
 
 const PLAY_COOKIE = "rp_play";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -56,7 +57,35 @@ function openQuestionIndex(
   return null;
 }
 
-async function questionSlice(
+function prefetchIndex(
+  game: Game,
+  phase: StateSlice["phase"],
+  now: number,
+): number | null {
+  if (!isLive(phase) || game.startsAt === null || game.schedule === null) {
+    return null;
+  }
+
+  const index =
+    phase.type === "get-ready"
+      ? phase.nextIndex
+      : phase.type === "pause"
+        ? phase.index + 1
+        : null;
+
+  if (index === null) {
+    return null;
+  }
+
+  const item = game.schedule.questions[index];
+  if (!item) {
+    return null;
+  }
+
+  return now >= game.startsAt + item.opensAt - PREFETCH_MS ? index : null;
+}
+
+async function currentSlice(
   game: Game,
   phase: StateSlice["phase"],
   now: number,
@@ -99,6 +128,21 @@ async function questionSlice(
   return { question: null, reveal: null };
 }
 
+async function questionSlice(
+  game: Game,
+  phase: StateSlice["phase"],
+  now: number,
+) {
+  const base = await currentSlice(game, phase, now);
+  const index = prefetchIndex(game, phase, now);
+  const upcoming = index === null ? null : await getCachedQuestionAt(game.id, index);
+
+  return {
+    ...base,
+    nextQuestion: upcoming ? toPublicQuestion(upcoming) : null,
+  };
+}
+
 async function answeredSlice(gameId: string, participantId: string) {
   const [answers, questions] = await Promise.all([
     getAnswersByParticipant(participantId),
@@ -119,6 +163,7 @@ async function answeredSlice(gameId: string, participantId: string) {
 
 async function publicState(game: Game, now: number) {
   const { phase, nextBoundaryAt } = computeState(game, now);
+  reconcileStatus(game, phase);
   const slice = await questionSlice(game, phase, now);
 
   return {
@@ -128,6 +173,7 @@ async function publicState(game: Game, now: number) {
     players: await getPlayerCount(game.id),
     question: slice.question,
     reveal: slice.reveal,
+    nextQuestion: slice.nextQuestion,
     game: {
       id: game.id,
       title: game.title,
