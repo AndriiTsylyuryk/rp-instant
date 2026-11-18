@@ -73,11 +73,15 @@ describe("computeState", () => {
 
     expect(computeState(game, 1000)).toEqual({
       phase: { type: "get-ready", nextIndex: 0 },
-      nextBoundaryAt: 5000,
+      nextBoundaryAt: 6000,
     });
     expect(computeState(game, 6000)).toEqual({
       phase: { type: "question", index: 0 },
-      nextBoundaryAt: 15000,
+      nextBoundaryAt: 16000,
+    });
+    expect(computeState(game, 16000)).toEqual({
+      phase: { type: "pause", index: 0 },
+      nextBoundaryAt: 24000,
     });
   });
 

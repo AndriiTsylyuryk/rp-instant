@@ -16,10 +16,9 @@ import { getPlayerCount, incrementPlayerCount } from "../player-count.js";
 import { getBoard, rankOf } from "../leaderboard-cache.js";
 import { computeState, type StateSlice } from "../state.js";
 import { reconcileStatus } from "../transitions.js";
+import { COOKIE_SECURE, PLAY_COOKIE } from "../auth/cookies.js";
 
-const PLAY_COOKIE = "rp_play";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
-const COOKIE_SECURE = process.env.NODE_ENV === "production";
 
 const NICK_MIN = 5;
 const NICK_MAX = 20;

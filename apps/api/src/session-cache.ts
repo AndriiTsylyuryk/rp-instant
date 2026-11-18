@@ -5,7 +5,7 @@ export type Session = {
   gameId: string;
   nickname: string;
   fanId: string | null;
-  score: number; // єдине змінне поле
+  score: number;
 };
 
 const cache = new Map<string, Session>();
@@ -47,7 +47,6 @@ export function getSession(token: string): Promise<Session | null> {
   return promise;
 }
 
-/** Після join — щоб перший же /play/state не йшов у базу. */
 export function putSession(token: string, session: Session): void {
   cache.set(token, session);
 }
@@ -56,7 +55,6 @@ export function invalidateSession(token: string): void {
   cache.delete(token);
 }
 
-/** Викликати на переході гри в ended. Без цього процес пухне на 2000 записів за матч. */
 export function dropGameSessions(gameId: string): number {
   let removed = 0;
   for (const [token, session] of cache) {

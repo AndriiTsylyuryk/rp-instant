@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import { playRoutes } from "./routes/play.js";
+import { authRoutes } from "./routes/auth.js";
+import { startAuthSessionSweep } from "./auth/session-store.js";
 
 const app = Fastify({
   logger: true,
@@ -8,7 +10,11 @@ const app = Fastify({
 });
 
 await app.register(cookie);
+
+app.decorateRequest("auth", null);
 await app.register(playRoutes, { prefix: "/api" });
+await app.register(authRoutes, { prefix: "/api" });
+startAuthSessionSweep();
 
 app.get("/api/health", async () => ({ ok: true }));
 

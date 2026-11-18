@@ -63,3 +63,28 @@ export type Me = {
     club: { id: string; name: string | null };
   } | null;
 };
+
+export type AuthCollection = "fans" | "managers";
+
+export type AuthSessionRequest = {
+  collection: AuthCollection;
+  token: string;
+};
+
+export type ViewerParticipant = {
+  nickname: string;
+  gameCode: string | null;
+};
+
+export type Viewer =
+  | { kind: "anonymous" }
+  | { kind: "guest"; participant: ViewerParticipant }
+  | {
+      kind: "fan";
+      fan: { id: string; nickname: string; email: string };
+      participant: ViewerParticipant | null;
+    }
+  | {
+      kind: "manager";
+      manager: { id: string; name: string; clubId: string };
+    };

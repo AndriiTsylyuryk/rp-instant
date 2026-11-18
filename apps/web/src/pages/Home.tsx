@@ -1,29 +1,79 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import type { FormEvent } from "react";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { joinGame } from "../api/game";
+import { isApiError } from "../api/http";
+import { useAuth } from "../auth/useAuth";
+
+const JOIN_ERRORS: Record<string, string> = {
+  bad_nickname: "Nickname must be 5–20 characters.",
+  not_found: "Game with this code was not found.",
+  game_ended: "This game has already ended.",
+  joining_locked: "Joining this game is closed.",
+  nickname_taken: "This nickname is already taken.",
+  network: "No connection to the server.",
+};
 
 export default function Home() {
-  const [now, setNow] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { viewer, refresh } = useAuth();
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
 
-  useEffect(() => {
-    fetch("/api/time")
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((d) => setNow(d.now))
-      .catch((e) => setError(String(e)));
-  }, []);
+  const [code, setCode] = useState((params.get("code") ?? "").toUpperCase());
+  const [nickname, setNickname] = useState(
+    viewer?.kind === "fan" ? viewer.fan.nickname : "",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (viewer?.kind === "manager") {
+    return <Navigate to="/admin" replace />;
+  }
+  const inGame =
+    viewer && "participant" in viewer ? viewer.participant : null;
+  if (inGame?.gameCode) {
+    return <Navigate to={`/play/${inGame.gameCode}`} replace />;
+  }
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const gameCode = code.trim().toUpperCase();
+      await joinGame(gameCode, nickname);
+      await refresh();
+      navigate(`/play/${gameCode}`);
+    } catch (err) {
+      setError(
+        (isApiError(err) && JOIN_ERRORS[err.code]) || "Could not join the game.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div>
-      <h1>RoundPicks</h1>
-      {error ? (
-        <p>Error: {error}</p>
-      ) : (
-        <p>
-          Server time: {now ? new Date(now).toLocaleTimeString() : "loading..."}
-        </p>
-      )}
-    </div>
+    <form className="form" onSubmit={onSubmit}>
+      <h1>Join game</h1>
+      <input
+        placeholder="Game code"
+        value={code}
+        onChange={(e) => setCode(e.target.value.toUpperCase())}
+        required
+      />
+      <input
+        placeholder="Nickname (5–20 characters)"
+        minLength={5}
+        maxLength={20}
+        value={nickname}
+        onChange={(e) => setNickname(e.target.value)}
+        required
+      />
+      {error && <p role="alert">{error}</p>}
+      <button className="btn primary" disabled={busy}>
+        Play
+      </button>
+    </form>
   );
 }

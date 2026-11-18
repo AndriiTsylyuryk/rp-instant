@@ -87,8 +87,6 @@ async function bumpScore(participantId: string, points: number): Promise<void> {
       }),
     );
   } catch {
-    // answers — джерело правди, participants.score — похідне.
-    // Розійшлося — полагодить recomputeScore, гру ламати не треба.
   }
 }
 

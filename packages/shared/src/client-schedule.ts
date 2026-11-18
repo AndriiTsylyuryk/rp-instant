@@ -7,9 +7,6 @@ import {
   LOBBY_LAST_MS,
   LOBBY_NEAR_MS,
   MIN_DELAY_MS,
-  PREFETCH_JITTER_MS,
-  PREFETCH_MS,
-  QUESTION_TIME_S,
 } from "./constants.js";
 import { Phase } from "./types.js";
 
@@ -28,16 +25,6 @@ function untilBoundary(state: ScheduleView, now: number): number {
   return Math.max(0, state.nextBoundaryAt - now);
 }
 
-/** Прокинутися, коли відкриється вікно передзавантаження. */
-function prefetchPoll(
-  state: ScheduleView,
-  now: number,
-  random: Random,
-): number {
-  const opensIn = untilBoundary(state, now);
-  return Math.max(0, opensIn - PREFETCH_MS) + random() * PREFETCH_JITTER_MS;
-}
-
 export function nextPollDelay(
   state: ScheduleView,
   now: number,
@@ -45,7 +32,6 @@ export function nextPollDelay(
 ): number | null {
   const phase = state.phase;
 
-  // draft / ended — чекаємо, нічого не плануємо
   if (typeof phase === "string") {
     return HEARTBEAT_MS;
   }
@@ -66,14 +52,7 @@ export function nextPollDelay(
     }
 
     case "get-ready":
-      // питання №0 ще не в руках — іти по нього
-      return state.nextQuestion
-        ? floor(
-            untilBoundary(state, now) +
-              QUESTION_TIME_S * 1000 +
-              random() * BOUNDARY_JITTER_MS,
-          )
-        : floor(prefetchPoll(state, now, random));
+      return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
 
     case "question":
       return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
@@ -83,15 +62,7 @@ export function nextPollDelay(
         return COUNTS_RETRY_MS + random() * COUNTS_RETRY_MS;
       }
 
-      if (!state.nextQuestion) {
-        return floor(prefetchPoll(state, now, random));
-      }
-
-      return floor(
-        untilBoundary(state, now) +
-          QUESTION_TIME_S * 1000 +
-          random() * BOUNDARY_JITTER_MS,
-      );
+      return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
     }
   }
 }

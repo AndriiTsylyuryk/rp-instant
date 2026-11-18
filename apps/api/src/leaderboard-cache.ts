@@ -6,7 +6,7 @@ const TOP_N = 10;
 
 type Board = {
   top: LeaderboardRow[];
-  scores: number[]; // усі бали, за спаданням — основа для рангу
+  scores: number[];
   builtAt: number;
 };
 
@@ -47,7 +47,6 @@ export function getBoard(gameId: string): Promise<Board> {
   return promise;
 }
 
-/** Скільки гравців мають строго більший бал, +1. Бінарний пошук по спадному масиву. */
 export function rankOf(board: Board, score: number): number {
   let low = 0;
   let high = board.scores.length;

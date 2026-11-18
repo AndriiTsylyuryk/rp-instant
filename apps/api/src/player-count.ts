@@ -36,8 +36,6 @@ export function incrementPlayerCount(gameId: string): void {
   if (hit) {
     hit.value += 1;
   }
-  // Якщо запису немає — нічого не робимо: наступне читання візьме
-  // COUNT з бази, і новий рядок там уже буде.
 }
 
 export function dropPlayerCount(gameId: string): void {

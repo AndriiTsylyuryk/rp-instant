@@ -14,17 +14,13 @@ const pending = new Set<string>();
 
 function wantedStatus(phase: StateSlice["phase"]): Game["status"] | null {
   if (typeof phase === "string") {
-    return null; // draft / ended — нічого доганяти
+    return null;
   }
   if (phase.type === "lobby") return "lobby";
   if (phase.type === "final") return "ended";
   return "live";
 }
 
-/**
- * Ліниве узгодження games.status із фазою. Викликається з читань стану,
- * нічого не чекає і ніколи не кидає — це сторона ефекту, а не частина відповіді.
- */
 export function reconcileStatus(game: Game, phase: StateSlice["phase"]): void {
   if (game.status === "ended" || game.status === "cancelled") {
     return;
@@ -56,7 +52,7 @@ async function goLive(game: Game, status: Game["status"]): Promise<void> {
 
 async function endGame(game: Game): Promise<void> {
   const board = await getBoard(game.id);
-  await saveFinalTop(game.id, board.top); // пише final_top, ended_at, status
+  await saveFinalTop(game.id, board.top);
   invalidateGame(game);
 
   setTimeout(() => {
@@ -64,7 +60,6 @@ async function endGame(game: Game): Promise<void> {
   }, EVICT_DELAY_MS).unref();
 }
 
-/** Звільнити всю пам'ять, яку тримала гра. */
 export async function releaseGame(gameId: string): Promise<void> {
   const questions = await getCachedQuestions(gameId).catch(() => []);
   for (const question of questions) {

@@ -22,5 +22,12 @@ export function computeState(game: Game, now: number): StateSlice {
     return { phase: { type: "lobby" }, nextBoundaryAt: game.startsAt };
   }
 
-  return getPhaseAt(game.schedule as Schedule, elapsed);
+  const slice = getPhaseAt(game.schedule as Schedule, elapsed);
+  return {
+    phase: slice.phase,
+    nextBoundaryAt:
+      slice.nextBoundaryAt === null
+        ? null
+        : game.startsAt + slice.nextBoundaryAt,
+  };
 }

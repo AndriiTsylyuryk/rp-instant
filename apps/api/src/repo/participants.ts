@@ -133,3 +133,12 @@ export function getScoreboard(
     }));
   });
 }
+
+export function linkParticipantToFan(
+  participantId: string,
+  fanId: string,
+): Promise<unknown> {
+  return withPb(() =>
+    pb.collection("participants").update(participantId, { fan: fanId }),
+  );
+}
