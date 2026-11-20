@@ -11,8 +11,11 @@ import {
 const mocks = vi.hoisted(() => ({
   getCachedGameByCode: vi.fn(),
   getCachedGameById: vi.fn(),
+  getCachedGameByScreenToken: vi.fn(),
   createParticipant: vi.fn(),
   getParticipantByToken: vi.fn(),
+  linkParticipantToFan: vi.fn(),
+  getAuthSession: vi.fn(),
   getSession: vi.fn(),
   putSession: vi.fn(),
   invalidateSession: vi.fn(),
@@ -37,11 +40,17 @@ vi.mock("../src/repo/pb.js", () => ({
 vi.mock("../src/game-cache.js", () => ({
   getCachedGameByCode: mocks.getCachedGameByCode,
   getCachedGameById: mocks.getCachedGameById,
+  getCachedGameByScreenToken: mocks.getCachedGameByScreenToken,
 }));
 
 vi.mock("../src/repo/participants.js", () => ({
   createParticipant: mocks.createParticipant,
   getParticipantByToken: mocks.getParticipantByToken,
+  linkParticipantToFan: mocks.linkParticipantToFan,
+}));
+
+vi.mock("../src/auth/session-store.js", () => ({
+  getAuthSession: mocks.getAuthSession,
 }));
 
 vi.mock("../src/session-cache.js", () => ({
@@ -399,6 +408,52 @@ describe("GET /api/game/state", () => {
   });
 });
 
+describe("GET /api/screen/state", () => {
+  const TOKEN = "S".repeat(24);
+
+  it("rejects malformed tokens without touching the cache", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/screen/state?token=short",
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "not_found" });
+    expect(mocks.getCachedGameByScreenToken).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for an unknown token", async () => {
+    mocks.getCachedGameByScreenToken.mockResolvedValue(null);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/screen/state?token=${TOKEN}`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(mocks.getCachedGameByScreenToken).toHaveBeenCalledWith(TOKEN);
+  });
+
+  it("returns the public state plus the join code", async () => {
+    mocks.getCachedGameByScreenToken.mockResolvedValue(makeGame());
+    mocks.getPlayerCount.mockResolvedValue(3);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/screen/state?token=${TOKEN}`,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.json()).toMatchObject({
+      phase: { type: "lobby" },
+      players: 3,
+      joinCode: "ABC123",
+      game: { id: "game_1", title: "Derby" },
+    });
+  });
+});
+
 describe("POST /api/join", () => {
   async function join(payload: Record<string, unknown>, cookieHeader?: string) {
     return app.inject({
@@ -523,6 +578,171 @@ describe("POST /api/join", () => {
       me: { id: "participant_1", nickname: "neo", score: 0 },
     });
     expect(res.headers["set-cookie"]).toContain("rp_play=new_token");
+  });
+});
+
+describe("POST /api/join as a logged-in fan", () => {
+  const AUTH_COOKIE_HEADER = "rp_auth=auth_token";
+
+  async function join(cookieHeader: string) {
+    return app.inject({
+      method: "POST",
+      url: "/api/join",
+      payload: { code: "ABC123", nickname: "player" },
+      headers: { cookie: cookieHeader },
+    });
+  }
+
+  it("links the new participant to the fan account", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(makeGame());
+    mocks.getAuthSession.mockResolvedValue({ role: "fan", userId: "fan_1" });
+    mocks.createParticipant.mockResolvedValue({
+      ok: true,
+      participant: makeParticipant({ score: 0, fanId: "fan_1" }),
+      sessionToken: "new_token",
+    });
+
+    const res = await join(AUTH_COOKIE_HEADER);
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.getAuthSession).toHaveBeenCalledWith("auth_token");
+    expect(mocks.createParticipant).toHaveBeenCalledWith(
+      "game_1",
+      "player",
+      "fan_1",
+    );
+    expect(mocks.putSession).toHaveBeenCalledWith(
+      "new_token",
+      expect.objectContaining({ fanId: "fan_1" }),
+    );
+  });
+
+  it("does not link managers", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(makeGame());
+    mocks.getAuthSession.mockResolvedValue({ role: "manager", userId: "m_1" });
+    mocks.createParticipant.mockResolvedValue({
+      ok: true,
+      participant: makeParticipant({ score: 0 }),
+      sessionToken: "new_token",
+    });
+
+    await join(AUTH_COOKIE_HEADER);
+
+    expect(mocks.createParticipant).toHaveBeenCalledWith("game_1", "player");
+  });
+
+  it("does not look up an auth session for guests", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(makeGame());
+    mocks.createParticipant.mockResolvedValue({
+      ok: true,
+      participant: makeParticipant({ score: 0 }),
+      sessionToken: "new_token",
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/join",
+      payload: { code: "ABC123", nickname: "player" },
+    });
+
+    expect(mocks.getAuthSession).not.toHaveBeenCalled();
+  });
+
+  it("links an already joined guest who logged in afterwards", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(makeGame());
+    mocks.getAuthSession.mockResolvedValue({ role: "fan", userId: "fan_1" });
+    mocks.getParticipantByToken.mockResolvedValue(makeParticipant());
+
+    const res = await join(`${AUTH_COOKIE_HEADER}; rp_play=token_1`);
+
+    expect(res.statusCode).toBe(200);
+    expect(mocks.linkParticipantToFan).toHaveBeenCalledWith(
+      "participant_1",
+      "fan_1",
+    );
+    expect(mocks.invalidateSession).toHaveBeenCalledWith("token_1");
+    expect(mocks.createParticipant).not.toHaveBeenCalled();
+  });
+});
+
+describe("play cookie lifetime", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  function endedGameHoursAgo(hours: number): Game {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    return makeGame({
+      status: "ended",
+      startsAt: BASE - schedule.endsAt - hours * HOUR,
+      schedule,
+    });
+  }
+
+  it("sets a 24h cookie when joining", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(makeGame());
+    mocks.createParticipant.mockResolvedValue({
+      ok: true,
+      participant: makeParticipant({ score: 0 }),
+      sessionToken: "new_token",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/join",
+      payload: { code: "ABC123", nickname: "player" },
+    });
+
+    expect(res.headers["set-cookie"]).toContain("Max-Age=86400");
+  });
+
+  it("shrinks the cookie to the rest of the 24h window after the game ends", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(endedGameHoursAgo(1));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/play/state",
+      headers: { cookie: PLAY_COOKIE },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["set-cookie"]).toContain("rp_play=token_1");
+    expect(res.headers["set-cookie"]).toContain("Max-Age=82800"); // 23 год
+  });
+
+  it("closes access once the 24h window is over", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(endedGameHoursAgo(25));
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/play/state",
+      headers: { cookie: PLAY_COOKIE },
+    });
+
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "no_session" });
+    expect(mocks.invalidateSession).toHaveBeenCalledWith("token_1");
+    expect(res.headers["set-cookie"]).toContain("rp_play=;");
+  });
+
+  it("does not touch the cookie while the game is still running", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(
+      liveGame(STARTING_BUFFER_MS + 2000),
+    );
+    mocks.getCachedQuestionAt.mockResolvedValue(makeQuestion());
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/play/state",
+      headers: { cookie: PLAY_COOKIE },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["set-cookie"]).toBeUndefined();
   });
 });
 

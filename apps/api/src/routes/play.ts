@@ -1,24 +1,72 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type {} from "@fastify/cookie";
 import { ANSWER_GRACE_MS, PREFETCH_MS, scoreAnswer } from "@rp/shared";
 import { Game } from "../repo/games.js";
 import {
   createParticipant,
   getParticipantByToken,
+  linkParticipantToFan,
 } from "../repo/participants.js";
 import { createAnswer, getAnswersByParticipant } from "../repo/answers.js";
 import { isCorrectOption, toPublicQuestion } from "../repo/questions.js";
 import { getCachedQuestionAt, getCachedQuestions } from "../questions-cache.js";
 import { getCachedCounts } from "../reveal-cache.js";
-import { getCachedGameByCode, getCachedGameById } from "../game-cache.js";
+import {
+  getCachedGameByCode,
+  getCachedGameById,
+  getCachedGameByScreenToken,
+} from "../game-cache.js";
 import { getSession, invalidateSession, putSession } from "../session-cache.js";
 import { getPlayerCount, incrementPlayerCount } from "../player-count.js";
 import { getBoard, rankOf } from "../leaderboard-cache.js";
 import { computeState, type StateSlice } from "../state.js";
 import { reconcileStatus } from "../transitions.js";
-import { COOKIE_SECURE, PLAY_COOKIE } from "../auth/cookies.js";
+import { AUTH_COOKIE, COOKIE_SECURE, PLAY_COOKIE } from "../auth/cookies.js";
+import { getAuthSession } from "../auth/session-store.js";
+import { endedAtOf, GUEST_RESULTS_TTL_MS } from "../game-lifecycle.js";
+import { rateLimit } from "../auth/rate-limit.js";
 
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+const JOIN_COOKIE_MAX_AGE_S = 60 * 60 * 24;
+
+function playCookieOptions(maxAgeSeconds: number) {
+  return {
+    path: "/api",
+    httpOnly: true,
+    secure: COOKIE_SECURE,
+    sameSite: "lax",
+    maxAge: maxAgeSeconds,
+  } as const;
+}
+
+function applyResultsWindow(
+  game: Game,
+  token: string,
+  reply: FastifyReply,
+  now: number,
+): boolean {
+  const endedAt = endedAtOf(game);
+  if (endedAt === null || now < endedAt) {
+    return true;
+  }
+
+  const remainingMs = endedAt + GUEST_RESULTS_TTL_MS - now;
+  if (remainingMs <= 0) {
+    invalidateSession(token);
+    reply.clearCookie(PLAY_COOKIE, { path: "/api" });
+    return false;
+  }
+
+  reply.setCookie(
+    PLAY_COOKIE,
+    token,
+    playCookieOptions(Math.floor(remainingMs / 1000)),
+  );
+  return true;
+}
+
+const SCREEN_TOKEN = /^[A-Za-z0-9]{24}$/;
+
+const screenByIp = rateLimit({ name: "screen-ip", max: 60, windowMs: 60_000 });
 
 const NICK_MIN = 5;
 const NICK_MAX = 20;
@@ -134,7 +182,8 @@ async function questionSlice(
 ) {
   const base = await currentSlice(game, phase, now);
   const index = prefetchIndex(game, phase, now);
-  const upcoming = index === null ? null : await getCachedQuestionAt(game.id, index);
+  const upcoming =
+    index === null ? null : await getCachedQuestionAt(game.id, index);
 
   return {
     ...base,
@@ -200,6 +249,23 @@ export async function playRoutes(app: FastifyInstance) {
     return publicState(game, Date.now());
   });
 
+  app.get("/screen/state", { preHandler: screenByIp }, async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+
+    const token = (req.query as Record<string, unknown>).token;
+
+    if (typeof token !== "string" || !SCREEN_TOKEN.test(token)) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const game = await getCachedGameByScreenToken(token);
+    if (!game) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    return { ...(await publicState(game, Date.now())), joinCode: game.code };
+  });
+
   app.post("/join", async (req, reply) => {
     reply.header("Cache-Control", "no-store");
 
@@ -225,10 +291,18 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: "joining_locked" });
     }
 
+    const authToken = req.cookies[AUTH_COOKIE];
+    const auth = authToken ? await getAuthSession(authToken) : null;
+    const fanId = auth?.role === "fan" ? auth.userId : null;
+
     const existingToken = req.cookies[PLAY_COOKIE];
     if (existingToken) {
       const existing = await getParticipantByToken(existingToken);
       if (existing && existing.gameId === game.id) {
+        if (fanId && existing.fanId === null) {
+          await linkParticipantToFan(existing.id, fanId);
+          invalidateSession(existingToken);
+        }
         return {
           me: {
             id: existing.id,
@@ -239,7 +313,9 @@ export async function playRoutes(app: FastifyInstance) {
       }
     }
 
-    const result = await createParticipant(game.id, nickname);
+    const result = fanId
+      ? await createParticipant(game.id, nickname, fanId)
+      : await createParticipant(game.id, nickname);
     if (!result.ok) {
       return reply.code(409).send({ error: result.reason });
     }
@@ -248,18 +324,16 @@ export async function playRoutes(app: FastifyInstance) {
       id: result.participant.id,
       gameId: game.id,
       nickname: result.participant.nickname,
-      fanId: null,
+      fanId,
       score: 0,
     });
     incrementPlayerCount(game.id);
 
-    reply.setCookie(PLAY_COOKIE, result.sessionToken, {
-      path: "/api",
-      httpOnly: true,
-      secure: COOKIE_SECURE,
-      sameSite: "lax",
-      maxAge: COOKIE_MAX_AGE,
-    });
+    reply.setCookie(
+      PLAY_COOKIE,
+      result.sessionToken,
+      playCookieOptions(JOIN_COOKIE_MAX_AGE_S),
+    );
 
     return {
       me: {
@@ -290,7 +364,12 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: "not_found" });
     }
 
-    const base = await publicState(game, Date.now());
+    const now = Date.now();
+    if (!applyResultsWindow(game, token, reply, now)) {
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    const base = await publicState(game, now);
     const board = await getBoard(game.id);
 
     return {
@@ -315,6 +394,11 @@ export async function playRoutes(app: FastifyInstance) {
 
     const me = await getSession(token);
     if (!me) {
+      return reply.code(401).send({ error: "no_session" });
+    }
+
+    const game = await getCachedGameById(me.gameId);
+    if (game && !applyResultsWindow(game, token, reply, Date.now())) {
       return reply.code(401).send({ error: "no_session" });
     }
 

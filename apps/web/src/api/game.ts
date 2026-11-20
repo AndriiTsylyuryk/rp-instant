@@ -42,7 +42,19 @@ export async function fetchPublicState(code: string): Promise<PublicState> {
   return data;
 }
 
+/** Стан для екрана арени: публічний стан плюс код приєднання (для QR). */
+export type ScreenState = PublicState & { joinCode: string };
+
+export async function fetchScreenState(token: string): Promise<ScreenState> {
+  const { data } = await http.get<ScreenState>("/screen/state", {
+    params: { token },
+  });
+  return data;
+}
+
+/** Через скільки питати знову. null = більше не питати (завершена гра). */
 export function pollDelay(state: PublicState): number | null {
+  if (state.phase === "ended") return null;
   return nextPollDelay(state, state.serverNow);
 }
 

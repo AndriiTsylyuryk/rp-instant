@@ -1,5 +1,6 @@
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/useAuth";
+import { shouldResumeGame } from "../lib/resumeGame";
 
 /**
  * Public landing page. Existing player, screen and admin routes stay unchanged;
@@ -31,9 +32,9 @@ export default function Landing() {
       </p>
 
       <div className="landing-actions">
-        {inGame?.gameCode ? (
-          <Link className="btn primary" to={`/play/${inGame.gameCode}`}>
-            Continue game
+        {viewer && shouldResumeGame(viewer) && inGame ? (
+          <Link className="btn primary" to="/play">
+            {inGame.gameStatus === "ended" ? "View results" : "Continue game"}
           </Link>
         ) : (
           <Link className="btn primary" to="/join">

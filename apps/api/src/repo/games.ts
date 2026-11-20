@@ -74,6 +74,26 @@ export async function getGameByCode(code: string): Promise<Game | null> {
   }
 }
 
+export async function getGameByScreenToken(
+  token: string,
+): Promise<Game | null> {
+  try {
+    return await withPb(async () => {
+      const row = await pb
+        .collection("games")
+        .getFirstListItem<GameRow>(
+          pb.filter("screen_token = {:t} && status != 'draft'", { t: token }),
+        );
+      return toGame(row);
+    });
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 404) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 export async function getGameById(id: string): Promise<Game | null> {
   try {
     return await withPb(async () => {

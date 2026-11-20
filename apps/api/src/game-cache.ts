@@ -1,4 +1,9 @@
-import { Game, getGameByCode, getGameById } from "./repo/games.js";
+import {
+  Game,
+  getGameByCode,
+  getGameById,
+  getGameByScreenToken,
+} from "./repo/games.js";
 
 const TTL_MS = 2000;
 const NEGATIVE_TTL_MS = 5000;
@@ -47,6 +52,12 @@ export function getCachedGameById(id: string): Promise<Game | null> {
 export function getCachedGameByCode(code: string): Promise<Game | null> {
   const normalized = code.toLocaleUpperCase();
   return load(`code:${normalized}`, () => getGameByCode(normalized));
+}
+
+export function getCachedGameByScreenToken(
+  token: string,
+): Promise<Game | null> {
+  return load(`screen:${token}`, () => getGameByScreenToken(token));
 }
 
 export function invalidateGame(game: Game): void {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { isApiError } from "../api/http";
 
 type PollingState<T> = { data: T | null; error: unknown };
 
@@ -40,7 +41,10 @@ export function usePolling<T>(
       } catch (error) {
         if (cancelled) return;
         setState((prev) => ({ data: prev.data, error }));
-        schedule(ERROR_RETRY_MS);
+
+        const fatal =
+          isApiError(error) && [401, 404, 410].includes(error.status);
+        schedule(fatal ? null : ERROR_RETRY_MS);
       }
     };
 

@@ -18,6 +18,7 @@ import type { Schedule } from "@rp/shared";
 import {
   getGameByCode,
   getGameById,
+  getGameByScreenToken,
   moveStartsAt,
   openLobby,
   saveFinalTop,
@@ -100,6 +101,28 @@ describe("getGameByCode", () => {
     getFirstListItem.mockRejectedValue(error);
 
     await expect(getGameByCode("ab12")).rejects.toBe(error);
+  });
+});
+
+describe("getGameByScreenToken", () => {
+  it("looks up a non-draft game by screen token", async () => {
+    getFirstListItem.mockResolvedValue(makeRow());
+
+    const game = await getGameByScreenToken("T".repeat(24));
+
+    expect(mocks.filter).toHaveBeenCalledWith(
+      "screen_token = {:t} && status != 'draft'",
+      { t: "T".repeat(24) },
+    );
+    expect(game?.id).toBe("game_1");
+  });
+
+  it("returns null when no game matches the token", async () => {
+    getFirstListItem.mockRejectedValue(
+      new ClientResponseError({ status: 404 }),
+    );
+
+    await expect(getGameByScreenToken("T".repeat(24))).resolves.toBeNull();
   });
 });
 

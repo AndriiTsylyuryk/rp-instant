@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildSchedule, STARTING_BUFFER_MS } from "@rp/shared";
 import type { Game } from "../src/repo/games.js";
 import type { AuthSession } from "../src/auth/session-store.js";
 import type { Session } from "../src/session-cache.js";
@@ -57,8 +58,16 @@ function makeAuthSession(overrides: Partial<AuthSession> = {}): AuthSession {
   };
 }
 
+const NOW = Date.parse("2026-01-01T12:00:00.000Z");
+const schedule = buildSchedule([{ kind: "quiz" }]);
+
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.spyOn(Date, "now").mockReturnValue(NOW);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("buildViewer", () => {
@@ -77,9 +86,58 @@ describe("buildViewer", () => {
       participant: {
         nickname: "neo",
         gameCode: "ABC123",
+        gameStatus: "lobby",
       },
     });
     expect(mocks.getCachedGameById).toHaveBeenCalledWith("game_1");
+  });
+
+  describe("participant game status", () => {
+    async function statusOf(game: Game | null) {
+      mocks.getCachedGameById.mockResolvedValue(game);
+      const viewer = await buildViewer(null, makeGuest());
+      return viewer.kind === "guest" ? viewer.participant.gameStatus : null;
+    }
+
+    it("is lobby before the game is scheduled", async () => {
+      await expect(statusOf(makeGame({ startsAt: null }))).resolves.toBe(
+        "lobby",
+      );
+    });
+
+    it("is live while questions are running", async () => {
+      const game = makeGame({
+        startsAt: NOW - STARTING_BUFFER_MS - 2000,
+        schedule,
+      });
+      await expect(statusOf(game)).resolves.toBe("live");
+    });
+
+    it("is ended when the schedule is over, even if status is still live", async () => {
+      const game = makeGame({
+        status: "live",
+        startsAt: NOW - schedule.endsAt - 1000,
+        schedule,
+      });
+      await expect(statusOf(game)).resolves.toBe("ended");
+    });
+
+    it("is ended for ended and cancelled games", async () => {
+      await expect(statusOf(makeGame({ status: "ended" }))).resolves.toBe(
+        "ended",
+      );
+      await expect(statusOf(makeGame({ status: "cancelled" }))).resolves.toBe(
+        "ended",
+      );
+    });
+
+    it("drops the participant when the game no longer exists", async () => {
+      mocks.getCachedGameById.mockResolvedValue(null);
+
+      await expect(buildViewer(null, makeGuest())).resolves.toEqual({
+        kind: "anonymous",
+      });
+    });
   });
 
   it("returns fan with participant", async () => {
@@ -97,6 +155,7 @@ describe("buildViewer", () => {
       participant: {
         nickname: "neo",
         gameCode: "ABC123",
+        gameStatus: "lobby",
       },
     });
   });

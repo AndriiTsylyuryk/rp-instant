@@ -22,6 +22,8 @@ import {
 import { buildViewer } from "../auth/viewer.js";
 import { createFan } from "../repo/fans.js";
 import { linkParticipantToFan } from "../repo/participants.js";
+import { getCachedGameById } from "../game-cache.js";
+import { resultsWindowOver } from "../game-lifecycle.js";
 import { getSession } from "../session-cache.js";
 
 const Collection = z.enum(["fans", "managers"]);
@@ -92,8 +94,11 @@ async function startSession(
   const playToken = req.cookies[PLAY_COOKIE];
   const guest = playToken ? await getSession(playToken) : null;
   if (user.role === "fan" && guest && guest.fanId === null) {
-    await linkParticipantToFan(guest.id, user.userId);
-    guest.fanId = user.userId;
+    const game = await getCachedGameById(guest.gameId);
+    if (!game || !resultsWindowOver(game, Date.now())) {
+      await linkParticipantToFan(guest.id, user.userId);
+      guest.fanId = user.userId;
+    }
   }
 
   reply.setCookie(AUTH_COOKIE, token, authCookieOptions);

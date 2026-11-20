@@ -74,6 +74,7 @@ export type AuthSessionRequest = {
 export type ViewerParticipant = {
   nickname: string;
   gameCode: string | null;
+  gameStatus: "lobby" | "live" | "ended";
 };
 
 export type Viewer =

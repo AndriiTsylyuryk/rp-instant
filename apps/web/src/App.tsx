@@ -22,7 +22,7 @@ export default function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/join" element={<Home />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/play/:code" element={<Play />} />
+          <Route path="/play" element={<Play />} />
           <Route
             path="/me"
             element={
@@ -34,7 +34,7 @@ export default function App() {
         </Route>
 
         <Route element={<ScreenLayout />}>
-          <Route path="/screen/:code" element={<Screen />} />
+          <Route path="/screen/:token" element={<Screen />} />
         </Route>
 
         <Route path="/admin/login" element={<AdminLogin />} />

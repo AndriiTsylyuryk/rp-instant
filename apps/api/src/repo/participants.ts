@@ -48,6 +48,7 @@ export type JoinResult =
 export async function createParticipant(
   gameId: string,
   nickname: string,
+  fanId?: string,
 ): Promise<JoinResult> {
   const sessionToken = newSessionToken();
 
@@ -59,6 +60,7 @@ export async function createParticipant(
         session_token: sessionToken,
         score: 0,
         hidden: false,
+        ...(fanId ? { fan: fanId } : {}),
       }),
     );
     return { ok: true, participant: toParticipant(row), sessionToken };

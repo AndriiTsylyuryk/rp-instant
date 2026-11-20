@@ -4,6 +4,7 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { joinGame } from "../api/game";
 import { isApiError } from "../api/http";
 import { useAuth } from "../auth/useAuth";
+import { shouldResumeGame } from "../lib/resumeGame";
 
 const JOIN_ERRORS: Record<string, string> = {
   bad_nickname: "Nickname must be 5–20 characters.",
@@ -29,10 +30,8 @@ export default function Home() {
   if (viewer?.kind === "manager") {
     return <Navigate to="/admin" replace />;
   }
-  const inGame =
-    viewer && "participant" in viewer ? viewer.participant : null;
-  if (inGame?.gameCode) {
-    return <Navigate to={`/play/${inGame.gameCode}`} replace />;
+  if (viewer && shouldResumeGame(viewer)) {
+    return <Navigate to="/play" replace />;
   }
 
   async function onSubmit(e: FormEvent) {
@@ -43,10 +42,11 @@ export default function Home() {
       const gameCode = code.trim().toUpperCase();
       await joinGame(gameCode, nickname);
       await refresh();
-      navigate(`/play/${gameCode}`);
+      navigate("/play");
     } catch (err) {
       setError(
-        (isApiError(err) && JOIN_ERRORS[err.code]) || "Could not join the game.",
+        (isApiError(err) && JOIN_ERRORS[err.code]) ||
+          "Could not join the game.",
       );
     } finally {
       setBusy(false);

@@ -4,11 +4,13 @@ import type { Game } from "../src/repo/games.js";
 const mocks = vi.hoisted(() => ({
   getGameByCode: vi.fn(),
   getGameById: vi.fn(),
+  getGameByScreenToken: vi.fn(),
 }));
 
 vi.mock("../src/repo/games.js", () => ({
   getGameByCode: mocks.getGameByCode,
   getGameById: mocks.getGameById,
+  getGameByScreenToken: mocks.getGameByScreenToken,
 }));
 
 type CacheModule = typeof import("../src/game-cache.js");
@@ -152,5 +154,30 @@ describe("invalidateGame", () => {
 
     expect(mocks.getGameByCode).toHaveBeenCalledTimes(2);
     expect(mocks.getGameById).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getCachedGameByScreenToken", () => {
+  const TOKEN = "A".repeat(24);
+
+  it("loads by token and serves the cached value", async () => {
+    const game = makeGame();
+    mocks.getGameByScreenToken.mockResolvedValue(game);
+
+    await expect(cache.getCachedGameByScreenToken(TOKEN)).resolves.toBe(game);
+    await expect(cache.getCachedGameByScreenToken(TOKEN)).resolves.toBe(game);
+
+    expect(mocks.getGameByScreenToken).toHaveBeenCalledTimes(1);
+    expect(mocks.getGameByScreenToken).toHaveBeenCalledWith(TOKEN);
+  });
+
+  it("caches misses so token probing does not reach the database", async () => {
+    mocks.getGameByScreenToken.mockResolvedValue(null);
+
+    await expect(cache.getCachedGameByScreenToken(TOKEN)).resolves.toBeNull();
+    vi.setSystemTime(BASE_TIME + NEGATIVE_TTL_MS - 1);
+    await expect(cache.getCachedGameByScreenToken(TOKEN)).resolves.toBeNull();
+
+    expect(mocks.getGameByScreenToken).toHaveBeenCalledTimes(1);
   });
 });

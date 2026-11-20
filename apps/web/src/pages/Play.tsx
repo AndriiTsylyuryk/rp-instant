@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { fetchPlayState, pollDelay, submitAnswer } from "../api/game";
 import type { PlayStateResponse } from "../api/game";
 import { isApiError } from "../api/http";
@@ -7,10 +7,8 @@ import { AuthCta } from "../components/AuthCta";
 import { usePolling } from "../hooks/usePolling";
 
 export default function Play() {
-  const { code = "" } = useParams();
-  const { data: state, error } = usePolling(() => fetchPlayState(), pollDelay, [
-    code,
-  ]);
+  // Гра береться з cookie rp_play (див. /play/state), а не з URL.
+  const { data: state, error } = usePolling(fetchPlayState, pollDelay, []);
 
   if (isApiError(error) && error.status === 401) {
     return <Navigate to="/" replace />;

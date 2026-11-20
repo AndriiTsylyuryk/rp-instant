@@ -1,20 +1,21 @@
 import { useParams } from "react-router-dom";
-import { fetchPublicState, pollDelay } from "../api/game";
+import { fetchScreenState, pollDelay } from "../api/game";
 import { usePolling } from "../hooks/usePolling";
 
 export default function Screen() {
-  const { code = "" } = useParams();
+  // Екран відкривається за непередбачуваним токеном, а не за кодом приєднання.
+  const { token = "" } = useParams();
   const { data: state, error } = usePolling(
-    () => fetchPublicState(code),
+    () => fetchScreenState(token),
     pollDelay,
-    [code],
+    [token],
   );
 
   if (error && !state) return <h1>Game not found</h1>;
   if (!state) return <h1>…</h1>;
 
   const { phase } = state;
-  const joinUrl = `${window.location.origin}/join?code=${code}`;
+  const joinUrl = `${window.location.origin}/join?code=${state.joinCode}`;
 
   if (typeof phase === "string") {
     return (
@@ -30,7 +31,7 @@ export default function Screen() {
       return (
         <div>
           <h1>{state.game.title}</h1>
-          <p>Code: {code}</p>
+          <p>Code: {state.joinCode}</p>
           <p>{joinUrl}</p>
           {/* TODO: QR-code (qrcode.react → <QRCodeSVG value={joinUrl} />) */}
           <p>Players: {state.players}</p>

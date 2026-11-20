@@ -1,6 +1,7 @@
 import type { Viewer, ViewerParticipant } from "@rp/shared";
 import { getCachedGameById } from "../game-cache.js";
 import type { Session } from "../session-cache.js";
+import { computeState } from "../state.js";
 import type { AuthSession } from "./session-store.js";
 
 async function toParticipant(
@@ -10,7 +11,21 @@ async function toParticipant(
     return null;
   }
   const game = await getCachedGameById(guest.gameId);
-  return { nickname: guest.nickname, gameCode: game?.code ?? null };
+  if (!game) {
+    return null;
+  }
+
+  const { phase } = computeState(game, Date.now());
+  const gameStatus =
+    typeof phase === "string"
+      ? "ended"
+      : phase.type === "lobby"
+        ? "lobby"
+        : phase.type === "final"
+          ? "ended"
+          : "live";
+
+  return { nickname: guest.nickname, gameCode: game.code, gameStatus };
 }
 
 export async function buildViewer(
