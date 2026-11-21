@@ -75,6 +75,7 @@ export type ViewerParticipant = {
   nickname: string;
   gameCode: string | null;
   gameStatus: "lobby" | "live" | "ended";
+  hasAccount: boolean;
 };
 
 export type Viewer =

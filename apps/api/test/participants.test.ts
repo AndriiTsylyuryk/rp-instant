@@ -21,12 +21,14 @@ import {
   getParticipantByToken,
   getScoreboard,
   newSessionToken,
+  revokeParticipantSession,
 } from "../src/repo/participants.js";
 
 const create = vi.fn();
 const getFirstListItem = vi.fn();
 const getList = vi.fn();
 const getFullList = vi.fn();
+const update = vi.fn();
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -50,6 +52,7 @@ beforeEach(() => {
     getFirstListItem,
     getList,
     getFullList,
+    update,
   });
 });
 
@@ -271,5 +274,18 @@ describe("getScoreboard", () => {
     getFullList.mockResolvedValue([]);
 
     await expect(getScoreboard("game_1")).resolves.toEqual([]);
+  });
+});
+
+describe("revokeParticipantSession", () => {
+  it("replaces the participant session token", async () => {
+    update.mockResolvedValue(makeRow({ session_token: "new_token" }));
+
+    await revokeParticipantSession("participant_1");
+
+    expect(mocks.collection).toHaveBeenCalledWith("participants");
+    expect(update).toHaveBeenCalledWith("participant_1", {
+      session_token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
   });
 });

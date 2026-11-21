@@ -20,7 +20,7 @@ export default function Play() {
 
   return (
     <section>
-      <AuthCta phase={state.phase} />
+      <AuthCta key={`${state.game.id}:${state.me.id}`} phase={state.phase} />
       <PhaseView state={state as PlayStateResponse} />
     </section>
   );

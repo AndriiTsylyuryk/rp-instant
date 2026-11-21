@@ -6,6 +6,7 @@ import {
   createParticipant,
   getParticipantByToken,
   linkParticipantToFan,
+  revokeParticipantSession,
 } from "../repo/participants.js";
 import { createAnswer, getAnswersByParticipant } from "../repo/answers.js";
 import { isCorrectOption, toPublicQuestion } from "../repo/questions.js";
@@ -75,6 +76,12 @@ type LivePhase = Exclude<StateSlice["phase"], string>;
 
 function isLive(phase: StateSlice["phase"]): phase is LivePhase {
   return typeof phase !== "string";
+}
+
+function isGameOver(phase: StateSlice["phase"]): boolean {
+  return typeof phase === "string"
+    ? phase === "ended"
+    : phase.type === "final";
 }
 
 function readCode(value: unknown): string {
@@ -382,6 +389,42 @@ export async function playRoutes(app: FastifyInstance) {
       },
       top: board.top,
     };
+  });
+
+  app.post("/play/skip-login", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+
+    const token = req.cookies[PLAY_COOKIE];
+    if (!token) {
+      return { ok: true };
+    }
+
+    const me = await getSession(token);
+    if (!me) {
+      invalidateSession(token);
+      reply.clearCookie(PLAY_COOKIE, { path: "/api" });
+      return { ok: true };
+    }
+    if (me.fanId !== null) {
+      return reply.code(403).send({ error: "account_owned" });
+    }
+
+    const game = await getCachedGameById(me.gameId);
+    if (!game) {
+      invalidateSession(token);
+      reply.clearCookie(PLAY_COOKIE, { path: "/api" });
+      return { ok: true };
+    }
+
+    const { phase } = computeState(game, Date.now());
+    if (!isGameOver(phase)) {
+      return reply.code(409).send({ error: "not_finished" });
+    }
+
+    await revokeParticipantSession(me.id);
+    invalidateSession(token);
+    reply.clearCookie(PLAY_COOKIE, { path: "/api" });
+    return { ok: true };
   });
 
   app.get("/play/history", async (req, reply) => {

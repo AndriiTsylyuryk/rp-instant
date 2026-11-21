@@ -87,9 +87,26 @@ describe("buildViewer", () => {
         nickname: "neo",
         gameCode: "ABC123",
         gameStatus: "lobby",
+        hasAccount: false,
       },
     });
     expect(mocks.getCachedGameById).toHaveBeenCalledWith("game_1");
+  });
+
+  it("marks a participant linked to a fan as account-owned", async () => {
+    mocks.getCachedGameById.mockResolvedValue(makeGame());
+
+    await expect(
+      buildViewer(null, makeGuest({ fanId: "fan_1" })),
+    ).resolves.toEqual({
+      kind: "guest",
+      participant: {
+        nickname: "neo",
+        gameCode: "ABC123",
+        gameStatus: "lobby",
+        hasAccount: true,
+      },
+    });
   });
 
   describe("participant game status", () => {
@@ -156,6 +173,7 @@ describe("buildViewer", () => {
         nickname: "neo",
         gameCode: "ABC123",
         gameStatus: "lobby",
+        hasAccount: false,
       },
     });
   });

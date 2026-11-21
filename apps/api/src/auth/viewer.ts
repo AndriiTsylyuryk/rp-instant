@@ -25,7 +25,12 @@ async function toParticipant(
           ? "ended"
           : "live";
 
-  return { nickname: guest.nickname, gameCode: game.code, gameStatus };
+  return {
+    nickname: guest.nickname,
+    gameCode: game.code,
+    gameStatus,
+    hasAccount: guest.fanId !== null,
+  };
 }
 
 export async function buildViewer(

@@ -144,3 +144,13 @@ export function linkParticipantToFan(
     pb.collection("participants").update(participantId, { fan: fanId }),
   );
 }
+
+export function revokeParticipantSession(
+  participantId: string,
+): Promise<unknown> {
+  return withPb(() =>
+    pb
+      .collection("participants")
+      .update(participantId, { session_token: newSessionToken() }),
+  );
+}

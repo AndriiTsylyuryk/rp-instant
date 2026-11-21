@@ -63,6 +63,10 @@ export async function fetchPlayState(): Promise<PlayStateResponse> {
   return data;
 }
 
+export async function skipLogin(): Promise<void> {
+  await http.post("/play/skip-login");
+}
+
 export async function joinGame(code: string, nickname: string): Promise<void> {
   await http.post("/join", { code, nickname });
 }

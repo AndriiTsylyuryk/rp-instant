@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   createParticipant: vi.fn(),
   getParticipantByToken: vi.fn(),
   linkParticipantToFan: vi.fn(),
+  revokeParticipantSession: vi.fn(),
   getAuthSession: vi.fn(),
   getSession: vi.fn(),
   putSession: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock("../src/repo/participants.js", () => ({
   createParticipant: mocks.createParticipant,
   getParticipantByToken: mocks.getParticipantByToken,
   linkParticipantToFan: mocks.linkParticipantToFan,
+  revokeParticipantSession: mocks.revokeParticipantSession,
 }));
 
 vi.mock("../src/auth/session-store.js", () => ({
@@ -847,6 +849,102 @@ describe("GET /api/play/state", () => {
       question: { index: 0, text: "Who wins?" },
       reveal: null,
     });
+  });
+});
+
+describe("POST /api/play/skip-login", () => {
+  function finalGame(): Game {
+    const schedule = buildSchedule([{ kind: "quiz" }]);
+    return makeGame({
+      status: "live",
+      startsAt: BASE - schedule.endsAt - 1000,
+      schedule,
+    });
+  }
+
+  function skip(cookieHeader: string | null = PLAY_COOKIE) {
+    return app.inject({
+      method: "POST",
+      url: "/api/play/skip-login",
+      headers: cookieHeader ? { cookie: cookieHeader } : undefined,
+    });
+  }
+
+  it("is idempotent without a play cookie", async () => {
+    const res = await skip(null);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(mocks.revokeParticipantSession).not.toHaveBeenCalled();
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("clears a stale play session", async () => {
+    mocks.getSession.mockResolvedValue(null);
+
+    const res = await skip("rp_play=stale");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(mocks.invalidateSession).toHaveBeenCalledWith("stale");
+    expect(res.headers["set-cookie"]).toContain("rp_play=;");
+  });
+
+  it("revokes the participant and clears the cookie at game over", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(finalGame());
+
+    const res = await skip();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(mocks.revokeParticipantSession).toHaveBeenCalledWith(
+      "participant_1",
+    );
+    expect(mocks.invalidateSession).toHaveBeenCalledWith("token_1");
+    expect(res.headers["set-cookie"]).toContain("rp_play=;");
+  });
+
+  it("rejects account-owned participation", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession({ fanId: "fan_1" }));
+    mocks.getCachedGameById.mockResolvedValue(finalGame());
+
+    const res = await skip();
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: "account_owned" });
+    expect(mocks.revokeParticipantSession).not.toHaveBeenCalled();
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("rejects while the game is still running", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(makeGame());
+
+    const res = await skip();
+
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({ error: "not_finished" });
+    expect(mocks.revokeParticipantSession).not.toHaveBeenCalled();
+    expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("clears the cookie when the game is missing", async () => {
+    useTime(BASE);
+    mocks.getSession.mockResolvedValue(makeSession());
+    mocks.getCachedGameById.mockResolvedValue(null);
+
+    const res = await skip();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true });
+    expect(mocks.invalidateSession).toHaveBeenCalledWith("token_1");
+    expect(res.headers["set-cookie"]).toContain("rp_play=;");
   });
 });
 

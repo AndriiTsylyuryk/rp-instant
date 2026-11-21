@@ -69,6 +69,37 @@ npm run seed:load
 k6 run load/match.js
 ```
 
+## Тест `/api/play/state`: 2000 гравців
+
+`load/state.js` перевіряє саме поллінг стану, а не відповіді. Кожен VU:
+
+1. Один раз робить `POST /api/join` і отримує власну cookie-сесію.
+2. Далі кожну секунду робить `GET /api/play/state`.
+3. Має власний cookie jar k6; `noCookiesReset: true` не дає k6 очистити
+   cookie після кожної ітерації.
+
+Запуск на 2000 VU:
+
+```powershell
+$env:LOAD_LEAD_SECONDS=30
+npm run seed:load
+$env:VUS=2000
+$env:STATE_INTERVAL_MS=1000
+$env:STATE_JITTER_MS=200
+$env:DURATION=120s
+& "C:\Program Files\k6\k6.exe" run load/state.js
+```
+
+`STATE_INTERVAL_MS=1000` означає одну спробу запиту на секунду на VU, тобто
+ціль ~2000 RPS. Якщо латентність запиту більша за 1 с, фактичний RPS буде нижчим.
+`STATE_JITTER_MS=0` дає синхронний пік (найгірший для сервера), `200` —
+реалістичніший розкид.
+
+Для перевірки нових TCP/TLS-з'єднань (а не keep-alive) запускайте окремий
+прогін з `--no-connection-reuse`; це набагато важче для nginx. Звичайний
+браузерний поллінг використовує keep-alive, тому основний тест має бути без
+цього прапорця.
+
 ## Налаштування
 
 Усі параметри задаються через env-змінні PowerShell:
