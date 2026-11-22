@@ -146,3 +146,19 @@ describe("invalidateQuestions", () => {
     expect(mocks.getQuestionsForGame).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("peekQuestions", () => {
+  it("returns nothing and does not hit the database when the game is not cached", () => {
+    expect(cache.peekQuestions("game_1")).toEqual([]);
+    expect(mocks.getQuestionsForGame).not.toHaveBeenCalled();
+  });
+
+  it("returns the cached questions without another query", async () => {
+    const questions = [makeQuestion()];
+    mocks.getQuestionsForGame.mockResolvedValue(questions);
+    await cache.getCachedQuestions("game_1");
+
+    expect(cache.peekQuestions("game_1")).toBe(questions);
+    expect(mocks.getQuestionsForGame).toHaveBeenCalledTimes(1);
+  });
+});

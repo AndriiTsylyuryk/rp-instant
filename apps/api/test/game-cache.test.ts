@@ -5,12 +5,17 @@ const mocks = vi.hoisted(() => ({
   getGameByCode: vi.fn(),
   getGameById: vi.fn(),
   getGameByScreenToken: vi.fn(),
+  trackGame: vi.fn(),
 }));
 
 vi.mock("../src/repo/games.js", () => ({
   getGameByCode: mocks.getGameByCode,
   getGameById: mocks.getGameById,
   getGameByScreenToken: mocks.getGameByScreenToken,
+}));
+
+vi.mock("../src/game-registry.js", () => ({
+  trackGame: mocks.trackGame,
 }));
 
 type CacheModule = typeof import("../src/game-cache.js");
@@ -179,5 +184,62 @@ describe("getCachedGameByScreenToken", () => {
     await expect(cache.getCachedGameByScreenToken(TOKEN)).resolves.toBeNull();
 
     expect(mocks.getGameByScreenToken).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("sweepGameCache", () => {
+  it("removes positive entries after the TTL and keeps fresh ones", async () => {
+    mocks.getGameByCode.mockResolvedValue(makeGame());
+    await cache.getCachedGameByCode("abc123"); // code: і id:
+    expect(cache.gameCacheSize()).toBe(2);
+
+    vi.setSystemTime(BASE_TIME + TTL_MS - 1);
+    cache.sweepGameCache();
+    expect(cache.gameCacheSize()).toBe(2);
+
+    vi.setSystemTime(BASE_TIME + TTL_MS);
+    cache.sweepGameCache();
+    expect(cache.gameCacheSize()).toBe(0);
+  });
+
+  it("removes negative entries after the negative TTL", async () => {
+    mocks.getGameByCode.mockResolvedValue(null);
+    await cache.getCachedGameByCode("zzz999");
+    expect(cache.gameCacheSize()).toBe(1);
+
+    vi.setSystemTime(BASE_TIME + NEGATIVE_TTL_MS);
+    cache.sweepGameCache();
+    expect(cache.gameCacheSize()).toBe(0);
+  });
+});
+
+describe("cache size limit", () => {
+  it("never holds more than MAX_GAME_CACHE_ENTRIES entries", async () => {
+    mocks.getGameByCode.mockResolvedValue(null);
+
+    for (let i = 0; i <= cache.MAX_GAME_CACHE_ENTRIES; i += 1) {
+      await cache.getCachedGameByCode(`C${i}`);
+    }
+
+    expect(cache.gameCacheSize()).toBe(cache.MAX_GAME_CACHE_ENTRIES);
+  });
+});
+
+describe("release tracking", () => {
+  it("registers loaded games for release", async () => {
+    const game = makeGame();
+    mocks.getGameByCode.mockResolvedValue(game);
+
+    await cache.getCachedGameByCode("abc123");
+
+    expect(mocks.trackGame).toHaveBeenCalledWith(game);
+  });
+
+  it("does not register misses", async () => {
+    mocks.getGameByCode.mockResolvedValue(null);
+
+    await cache.getCachedGameByCode("abc123");
+
+    expect(mocks.trackGame).not.toHaveBeenCalled();
   });
 });

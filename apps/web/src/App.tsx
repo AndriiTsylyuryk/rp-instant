@@ -3,7 +3,8 @@ import { Route, Routes } from "react-router-dom";
 import { RequireRole } from "./auth/RequireRole";
 import { PlayerLayout } from "./layouts/PlayerLayout";
 import { ScreenLayout } from "./layouts/ScreenLayout";
-import Home from "./pages/Home";
+import JoinName from "./pages/JoinName";
+import JoinPin from "./pages/JoinPin";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Play from "./pages/Play";
@@ -20,7 +21,8 @@ export default function App() {
       <Routes>
         <Route element={<PlayerLayout />}>
           <Route path="/" element={<Landing />} />
-          <Route path="/join" element={<Home />} />
+          <Route path="/join" element={<JoinPin />} />
+          <Route path="/join/name" element={<JoinName />} />
           <Route path="/login" element={<Login />} />
           <Route path="/play" element={<Play />} />
           <Route

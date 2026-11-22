@@ -35,6 +35,18 @@ export type PlayStateResponse = PublicState & {
   top: LeaderboardRow[];
 };
 
+/** Перший крок входу: чи існує гра з таким PIN і чи можна приєднатись. */
+export async function lookupGame(code: string): Promise<{
+  title: string;
+  sponsor: PublicState["game"]["sponsor"];
+}> {
+  const { data } = await http.get<{
+    title: string;
+    sponsor: PublicState["game"]["sponsor"];
+  }>("/game/lookup", { params: { code } });
+  return data;
+}
+
 export async function fetchPublicState(code: string): Promise<PublicState> {
   const { data } = await http.get<PublicState>("/game/state", {
     params: { code },

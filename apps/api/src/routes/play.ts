@@ -69,6 +69,16 @@ const SCREEN_TOKEN = /^[A-Za-z0-9]{24}$/;
 
 const screenByIp = rateLimit({ name: "screen-ip", max: 60, windowMs: 60_000 });
 
+/**
+ * Формат PIN. Усе, що не схоже на код, відсікаємо ДО кешу й БД: сміттєві ключі
+ * не потрапляють у game-cache. Якщо ваші join_code містять інші символи
+ * (наприклад, "-"), розширте цей regex.
+ */
+const PIN_FORMAT = /^[A-Z0-9]{6,12}$/;
+
+// Перевірка PIN: 30 спроб за хвилину на IP достатньо людині, але не перебору.
+const lookupByIp = rateLimit({ name: "lookup-ip", max: 30, windowMs: 60_000 });
+
 const NICK_MIN = 5;
 const NICK_MAX = 20;
 
@@ -244,7 +254,7 @@ export async function playRoutes(app: FastifyInstance) {
     reply.header("Cache-Control", "no-store");
 
     const code = readCode((req.query as Record<string, unknown>).code);
-    if (code.length < 6) {
+    if (!PIN_FORMAT.test(code)) {
       return reply.code(404).send({ error: "not_found" });
     }
 
@@ -254,6 +264,33 @@ export async function playRoutes(app: FastifyInstance) {
     }
 
     return publicState(game, Date.now());
+  });
+
+  /**
+   * Перший крок входу: чи існує гра з таким PIN і чи можна приєднатися.
+   * Гра береться з game-cache, тож у сталому режимі це 0 запитів у БД, а
+   * наступний /join бере ту саму гру з того ж кешу.
+   */
+  app.get("/game/lookup", { preHandler: lookupByIp }, async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+
+    const code = readCode((req.query as Record<string, unknown>).code);
+    if (!PIN_FORMAT.test(code)) {
+      return reply.code(404).send({ error: "not_found" });
+    }
+
+    const game = await getCachedGameByCode(code);
+    if (!game || game.status === "draft") {
+      return reply.code(404).send({ error: "not_found" });
+    }
+    if (game.status === "ended" || game.status === "cancelled") {
+      return reply.code(410).send({ error: "game_ended" });
+    }
+    if (game.joiningLocked) {
+      return reply.code(403).send({ error: "joining_locked" });
+    }
+
+    return { title: game.title, sponsor: game.sponsor };
   });
 
   app.get("/screen/state", { preHandler: screenByIp }, async (req, reply) => {
@@ -285,6 +322,9 @@ export async function playRoutes(app: FastifyInstance) {
 
     if (nickname.length < NICK_MIN || nickname.length > NICK_MAX) {
       return reply.code(400).send({ error: "bad_nickname" });
+    }
+    if (!PIN_FORMAT.test(code)) {
+      return reply.code(404).send({ error: "not_found" });
     }
 
     const game = await getCachedGameByCode(code);

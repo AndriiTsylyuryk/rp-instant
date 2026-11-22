@@ -4,11 +4,9 @@ import { invalidateGame } from "./game-cache.js";
 import { getBoard, invalidateBoard } from "./leaderboard-cache.js";
 import { dropGameSessions } from "./session-cache.js";
 import { dropPlayerCount } from "./player-count.js";
-import { getCachedQuestions, invalidateQuestions } from "./questions-cache.js";
+import { invalidateQuestions, peekQuestions } from "./questions-cache.js";
 import { invalidateCounts } from "./reveal-cache.js";
 import type { StateSlice } from "./state.js";
-
-const EVICT_DELAY_MS = 10 * 60 * 1000;
 
 const pending = new Set<string>();
 
@@ -54,15 +52,10 @@ async function endGame(game: Game): Promise<void> {
   const board = await getBoard(game.id);
   await saveFinalTop(game.id, board.top);
   invalidateGame(game);
-
-  setTimeout(() => {
-    void releaseGame(game.id);
-  }, EVICT_DELAY_MS).unref();
 }
 
 export async function releaseGame(gameId: string): Promise<void> {
-  const questions = await getCachedQuestions(gameId).catch(() => []);
-  for (const question of questions) {
+  for (const question of peekQuestions(gameId)) {
     invalidateCounts(question.id);
   }
 

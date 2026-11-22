@@ -40,3 +40,7 @@ export async function getCachedQuestionAt(
 export function invalidateQuestions(gameId: string): void {
   cache.delete(gameId);
 }
+
+export function peekQuestions(gameId: string): Question[] {
+  return cache.get(gameId) ?? [];
+}

@@ -456,6 +456,65 @@ describe("GET /api/screen/state", () => {
   });
 });
 
+describe("GET /api/game/lookup", () => {
+  const lookup = (code: string) =>
+    app.inject({ method: "GET", url: `/api/game/lookup?code=${code}` });
+
+  it("rejects malformed codes without touching the cache", async () => {
+    for (const code of ["ABC", "ab%20cd!", "A".repeat(40)]) {
+      const res = await lookup(code);
+      expect(res.statusCode).toBe(404);
+    }
+    expect(mocks.getCachedGameByCode).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for a missing or draft game", async () => {
+    mocks.getCachedGameByCode.mockResolvedValueOnce(null);
+    expect((await lookup("ABC123")).statusCode).toBe(404);
+
+    mocks.getCachedGameByCode.mockResolvedValueOnce(
+      makeGame({ status: "draft" }),
+    );
+    expect((await lookup("ABC123")).statusCode).toBe(404);
+  });
+
+  it("returns game_ended for ended and cancelled games", async () => {
+    for (const status of ["ended", "cancelled"] as const) {
+      mocks.getCachedGameByCode.mockResolvedValueOnce(makeGame({ status }));
+      const res = await lookup("ABC123");
+      expect(res.statusCode).toBe(410);
+      expect(res.json()).toEqual({ error: "game_ended" });
+    }
+  });
+
+  it("returns joining_locked when joining is closed", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(
+      makeGame({ joiningLocked: true }),
+    );
+
+    const res = await lookup("ABC123");
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json()).toEqual({ error: "joining_locked" });
+  });
+
+  it("returns only the title and sponsor of a joinable game", async () => {
+    mocks.getCachedGameByCode.mockResolvedValue(
+      makeGame({ sponsor: { name: "Acme", logoUrl: null } }),
+    );
+
+    const res = await lookup("abc123");
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(mocks.getCachedGameByCode).toHaveBeenCalledWith("ABC123");
+    expect(res.json()).toEqual({
+      title: "Derby",
+      sponsor: { name: "Acme", logoUrl: null },
+    });
+  });
+});
+
 describe("POST /api/join", () => {
   async function join(payload: Record<string, unknown>, cookieHeader?: string) {
     return app.inject({
@@ -465,6 +524,14 @@ describe("POST /api/join", () => {
       headers: cookieHeader ? { cookie: cookieHeader } : undefined,
     });
   }
+
+  it("rejects a malformed code without touching the cache", async () => {
+    const res = await join({ code: "no", nickname: "player" });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "not_found" });
+    expect(mocks.getCachedGameByCode).not.toHaveBeenCalled();
+  });
 
   it("rejects nicknames outside the allowed length", async () => {
     const short = await join({ code: "ABC123", nickname: "neo" });

@@ -4,14 +4,26 @@ import {
   getGameById,
   getGameByScreenToken,
 } from "./repo/games.js";
+import { trackGame } from "./game-registry.js";
 
 const TTL_MS = 2000;
 const NEGATIVE_TTL_MS = 5000;
+
+export const MAX_GAME_CACHE_ENTRIES = 5000;
 
 type Entry = { game: Game | null; fetchedAt: number };
 
 const cache = new Map<string, Entry>();
 const inflight = new Map<string, Promise<Game | null>>();
+
+function put(key: string, entry: Entry): void {
+  cache.set(key, entry);
+
+  for (const oldest of cache.keys()) {
+    if (cache.size <= MAX_GAME_CACHE_ENTRIES) break;
+    cache.delete(oldest);
+  }
+}
 
 function isFresh(entry: Entry, now: number): boolean {
   const ttl = entry.game ? TTL_MS : NEGATIVE_TTL_MS;
@@ -33,8 +45,11 @@ function load(
   const promise = loader()
     .then((game) => {
       const at = Date.now();
-      cache.set(key, { game, fetchedAt: at });
-      if (game) cache.set(`id:${game.id}`, { game, fetchedAt: at });
+      put(key, { game, fetchedAt: at });
+      if (game) {
+        put(`id:${game.id}`, { game, fetchedAt: at });
+        trackGame(game);
+      }
       return game;
     })
     .finally(() => {
@@ -63,4 +78,16 @@ export function getCachedGameByScreenToken(
 export function invalidateGame(game: Game): void {
   cache.delete(`id:${game.id}`);
   cache.delete(`code:${game.code.toLocaleUpperCase()}`);
+}
+
+export function sweepGameCache(now: number = Date.now()): void {
+  for (const [key, entry] of cache) {
+    if (!isFresh(entry, now)) {
+      cache.delete(key);
+    }
+  }
+}
+
+export function gameCacheSize(): number {
+  return cache.size;
 }
