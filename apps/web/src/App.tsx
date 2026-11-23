@@ -7,6 +7,7 @@ import JoinName from "./pages/JoinName";
 import JoinPin from "./pages/JoinPin";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import VerifyEmail from "./pages/VerifyEmail";
 import Play from "./pages/Play";
 import Screen from "./pages/Screen";
 
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/join" element={<JoinPin />} />
           <Route path="/join/name" element={<JoinName />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/play" element={<Play />} />
           <Route
             path="/me"

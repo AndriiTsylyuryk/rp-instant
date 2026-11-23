@@ -9,6 +9,7 @@ export type VerifiedUser = {
   userId: string;
   role: AuthRole;
   profile: SessionProfile;
+  emailVerified?: boolean;
 };
 
 const ROLE_BY_COLLECTION: Record<AuthCollection, AuthRole> = {
@@ -20,15 +21,14 @@ function str(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-function toVerified(
+export function toVerified(
   collection: AuthCollection,
   record: RecordModel,
 ): VerifiedUser {
-  // TODO: для fans можна вимагати record.verified === true,
-  // коли налаштуєте SMTP і підтвердження email для реєстрації паролем.
   return {
     userId: record.id,
     role: ROLE_BY_COLLECTION[collection],
+    emailVerified: collection === "fans" ? record.verified === true : true,
     profile: {
       name: str(record.name),
       nickname: str(record.nickname),

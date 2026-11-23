@@ -8,11 +8,14 @@ import {
   authCookieOptions,
 } from "../auth/cookies.js";
 import { csrfGuard } from "../auth/guards.js";
+import { verifyGoogleIdToken } from "../auth/google.js";
 import {
+  toVerified,
   verifyPassword,
   verifyPbToken,
   type VerifiedUser,
 } from "../auth/pb-verify.js";
+import { createSignupToken, verifySignupToken } from "../auth/signup-token.js";
 import { rateLimit } from "../auth/rate-limit.js";
 import {
   createAuthSession,
@@ -20,7 +23,14 @@ import {
   getAuthSession,
 } from "../auth/session-store.js";
 import { buildViewer } from "../auth/viewer.js";
-import { createFan } from "../repo/fans.js";
+import {
+  confirmFanVerification,
+  createFan,
+  deleteFan,
+  findAccountByEmail,
+  randomPassword,
+  requestFanVerification,
+} from "../repo/fans.js";
 import { linkParticipantToFan } from "../repo/participants.js";
 import { getCachedGameById } from "../game-cache.js";
 import { resultsWindowOver } from "../game-lifecycle.js";
@@ -44,13 +54,29 @@ const LoginBody = z.object({
   password: z.string().min(1).max(200),
 });
 
+const Nickname = z
+  .string()
+  .transform((s) => s.trim().replace(/\s+/g, " "))
+  .pipe(z.string().min(5).max(20));
+
 const SignupBody = z.object({
   email: Email,
   password: z.string().min(8).max(71),
-  nickname: z
-    .string()
-    .transform((s) => s.trim().replace(/\s+/g, " "))
-    .pipe(z.string().min(5).max(20)),
+  nickname: Nickname,
+  consent: z.literal(true),
+});
+
+const VerifyBody = z.object({ token: z.string().min(20).max(2048) });
+const ResendBody = z.object({ email: Email });
+
+const GoogleBody = z.object({
+  collection: Collection,
+  credential: z.string().min(20).max(4096),
+});
+
+const GoogleCompleteBody = z.object({
+  signupToken: z.string().min(20).max(1024),
+  nickname: Nickname,
   consent: z.literal(true),
 });
 
@@ -78,6 +104,27 @@ const sessionByIp = rateLimit({
   max: 30,
   windowMs: 10 * MINUTE,
 });
+
+const resendByIp = rateLimit({
+  name: "resend-ip",
+  max: 10,
+  windowMs: 60 * MINUTE,
+});
+const resendByEmail = rateLimit({
+  name: "resend-email",
+  max: 3,
+  windowMs: 15 * MINUTE,
+  key: (req) =>
+    String((req.body as { email?: unknown } | null)?.email ?? "").toLowerCase(),
+});
+
+async function sendVerification(req: FastifyRequest, email: string) {
+  try {
+    await requestFanVerification(email);
+  } catch (err) {
+    req.log.error(err, "verification email failed");
+  }
+}
 
 async function startSession(
   req: FastifyRequest,
@@ -141,16 +188,8 @@ export async function authRoutes(app: FastifyInstance) {
         );
       }
 
-      return startSession(req, reply, {
-        userId: created.fan.id,
-        role: "fan",
-        profile: {
-          name: null,
-          nickname: created.fan.nickname,
-          email: created.fan.email,
-          clubId: null,
-        },
-      });
+      await sendVerification(req, created.fan.email);
+      return { status: "verification_sent" as const, email: created.fan.email };
     },
   );
 
@@ -172,6 +211,9 @@ export async function authRoutes(app: FastifyInstance) {
       );
       if (!user) {
         throw createHttpError(401, "invalid_credentials");
+      }
+      if (user.emailVerified === false) {
+        throw createHttpError(403, "email_not_verified");
       }
 
       return startSession(req, reply, user);
@@ -195,6 +237,130 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       return startSession(req, reply, user);
+    },
+  );
+
+  app.post(
+    "/auth/verify-email",
+    { preHandler: [csrfGuard, sessionByIp] },
+    async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+
+      const body = VerifyBody.safeParse(req.body);
+      if (!body.success) {
+        throw createHttpError(400, "bad_request");
+      }
+      if (!(await confirmFanVerification(body.data.token))) {
+        throw createHttpError(400, "invalid_verification_token");
+      }
+      return { ok: true };
+    },
+  );
+
+  app.post(
+    "/auth/resend-verification",
+    { preHandler: [csrfGuard, resendByIp, resendByEmail] },
+    async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+
+      const body = ResendBody.safeParse(req.body);
+      if (!body.success) {
+        throw createHttpError(400, "bad_request");
+      }
+
+      await sendVerification(req, body.data.email);
+      return { ok: true };
+    },
+  );
+
+  app.post(
+    "/auth/google",
+    { preHandler: [csrfGuard, sessionByIp] },
+    async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+
+      const body = GoogleBody.safeParse(req.body);
+      if (!body.success) {
+        throw createHttpError(400, "bad_request");
+      }
+
+      const identity = await verifyGoogleIdToken(body.data.credential);
+      if (!identity) {
+        throw createHttpError(401, "invalid_google_token");
+      }
+
+      const { collection } = body.data;
+      let record = await findAccountByEmail(collection, identity.email);
+
+      if (collection === "fans" && record && record.verified !== true) {
+        await deleteFan(record.id);
+        record = null;
+      }
+
+      if (!record) {
+        if (collection === "managers") {
+          throw createHttpError(403, "no_account");
+        }
+        return {
+          status: "signup_required" as const,
+          email: identity.email,
+          suggestedNickname: identity.name?.slice(0, 20) ?? "",
+          signupToken: createSignupToken({
+            email: identity.email,
+            sub: identity.sub,
+          }),
+        };
+      }
+
+      const result = await startSession(
+        req,
+        reply,
+        toVerified(collection, record),
+      );
+      return { status: "ok" as const, ...result };
+    },
+  );
+
+  app.post(
+    "/auth/google/complete",
+    { preHandler: [csrfGuard, signupByIp] },
+    async (req, reply) => {
+      reply.header("Cache-Control", "no-store");
+
+      const body = GoogleCompleteBody.safeParse(req.body);
+      if (!body.success) {
+        throw createHttpError(400, "bad_request");
+      }
+
+      const claims = verifySignupToken(body.data.signupToken);
+      if (!claims) {
+        throw createHttpError(401, "signup_expired");
+      }
+
+      const created = await createFan({
+        email: claims.email,
+        password: randomPassword(),
+        nickname: body.data.nickname,
+        verified: true,
+      });
+      if (!created.ok) {
+        throw createHttpError(
+          created.reason === "email_taken" ? 409 : 400,
+          created.reason,
+        );
+      }
+
+      const result = await startSession(req, reply, {
+        userId: created.fan.id,
+        role: "fan",
+        profile: {
+          name: null,
+          nickname: created.fan.nickname,
+          email: created.fan.email,
+          clubId: null,
+        },
+      });
+      return { status: "ok" as const, ...result };
     },
   );
 

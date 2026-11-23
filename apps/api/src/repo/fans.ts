@@ -1,5 +1,8 @@
-import { ClientResponseError } from "pocketbase";
-import { pb, withPb } from "./pb.js";
+import { randomBytes } from "node:crypto";
+import PocketBase, { ClientResponseError } from "pocketbase";
+import type { RecordModel } from "pocketbase";
+import type { AuthCollection } from "@rp/shared";
+import { PB_URL, pb, withPb } from "./pb.js";
 
 export type CreatedFan = { id: string; email: string; nickname: string };
 
@@ -13,6 +16,7 @@ export async function createFan(input: {
   email: string;
   password: string;
   nickname: string;
+  verified?: boolean;
 }): Promise<CreateFanResult> {
   try {
     const row = await withPb(() =>
@@ -22,6 +26,7 @@ export async function createFan(input: {
         passwordConfirm: input.password,
         nickname: input.nickname,
         emailVisibility: false,
+        verified: input.verified ?? false,
         consent_at: new Date().toISOString(),
       }),
     );
@@ -39,6 +44,49 @@ export async function createFan(input: {
       }
       return { ok: false, reason: "invalid" };
     }
+    throw err;
+  }
+}
+
+export function randomPassword(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export async function findAccountByEmail(
+  collection: AuthCollection,
+  email: string,
+): Promise<RecordModel | null> {
+  try {
+    return await withPb(() =>
+      pb
+        .collection(collection)
+        .getFirstListItem(pb.filter("email = {:email}", { email })),
+    );
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function deleteFan(id: string): Promise<void> {
+  try {
+    await withPb(() => pb.collection("fans").delete(id));
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 404) return;
+    throw err;
+  }
+}
+
+export async function requestFanVerification(email: string): Promise<void> {
+  await withPb(() => pb.collection("fans").requestVerification(email));
+}
+
+export async function confirmFanVerification(token: string): Promise<boolean> {
+  try {
+    await new PocketBase(PB_URL).collection("fans").confirmVerification(token);
+    return true;
+  } catch (err) {
+    if (err instanceof ClientResponseError && err.status === 400) return false;
     throw err;
   }
 }

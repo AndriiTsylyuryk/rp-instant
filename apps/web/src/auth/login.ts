@@ -1,30 +1,12 @@
 import type { AuthCollection, Viewer } from "@rp/shared";
-import { exchangePbToken, loginWithPasswordApi, signUpApi } from "../api/auth";
-import { pb } from "./pb";
-
-export type OAuthProvider = "google";
-
-async function finish(
-  collection: AuthCollection,
-  token: string,
-): Promise<Viewer> {
-  try {
-    return await exchangePbToken(collection, token);
-  } finally {
-    pb.authStore.clear();
-  }
-}
-
-export async function loginWithOAuth(
-  collection: AuthCollection,
-  provider: OAuthProvider,
-): Promise<Viewer> {
-  const res = await pb.collection(collection).authWithOAuth2({
-    provider,
-    redirectURL: "http://localhost:5173/",
-  });
-  return finish(collection, res.token);
-}
+import {
+  googleCompleteApi,
+  googleLoginApi,
+  loginWithPasswordApi,
+  resendVerificationApi,
+  signUpApi,
+} from "../api/auth";
+import type { GoogleLoginResult } from "../api/auth";
 
 export function loginWithPassword(
   collection: AuthCollection,
@@ -39,6 +21,23 @@ export function signUpFan(
   password: string,
   nickname: string,
   consent: boolean,
-): Promise<Viewer> {
+): Promise<{ email: string }> {
   return signUpApi({ email, password, nickname, consent });
+}
+
+export const resendVerification = resendVerificationApi;
+
+export function loginWithGoogle(
+  collection: AuthCollection,
+  credential: string,
+): Promise<GoogleLoginResult> {
+  return googleLoginApi(collection, credential);
+}
+
+export function completeGoogleSignup(
+  signupToken: string,
+  nickname: string,
+  consent: boolean,
+): Promise<Viewer> {
+  return googleCompleteApi({ signupToken, nickname, consent });
 }
