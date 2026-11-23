@@ -1,9 +1,5 @@
 import type { AuthCollection, Viewer } from "@rp/shared";
-import {
-  exchangePbToken,
-  loginWithPasswordApi,
-  signUpApi,
-} from "../api/auth";
+import { exchangePbToken, loginWithPasswordApi, signUpApi } from "../api/auth";
 import { pb } from "./pb";
 
 export type OAuthProvider = "google";
@@ -23,7 +19,10 @@ export async function loginWithOAuth(
   collection: AuthCollection,
   provider: OAuthProvider,
 ): Promise<Viewer> {
-  const res = await pb.collection(collection).authWithOAuth2({ provider });
+  const res = await pb.collection(collection).authWithOAuth2({
+    provider,
+    redirectURL: "http://localhost:5173/",
+  });
   return finish(collection, res.token);
 }
 

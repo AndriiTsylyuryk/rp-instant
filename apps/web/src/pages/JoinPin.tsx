@@ -1,20 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
-import { lookupGame } from "../api/game";
+import { joinGame, lookupGame } from "../api/game";
 import { useAuth } from "../auth/useAuth";
 import { describeJoinError } from "../lib/joinErrors";
 import { shouldResumeGame } from "../lib/resumeGame";
 
-/**
- * Крок 1 входу в гру: PIN.
- * Перевіряємо PIN окремим запитом (/game/lookup), тож помилку видно одразу,
- * а не після введення нікнейма. PIN передаємо на крок 2 через стан навігації,
- * а не в URL: адреса не стає посиланням, яке "живе вічно".
- * Якщо PIN прийшов зі скану QR (?code=), перевірка робиться автоматично.
- */
 export default function JoinPin() {
-  const { viewer } = useAuth();
+  const { viewer, refresh } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
@@ -30,6 +23,17 @@ export default function JoinPin() {
       try {
         const pin = value.trim().toUpperCase();
         const game = await lookupGame(pin);
+        
+        if (viewer?.kind === "fan") {
+          const nick = viewer.fan.nickname.trim();
+          if (nick) {
+            await joinGame(pin, nick);
+            await refresh();
+            navigate("/play", { replace: true });
+            return;
+          }
+        }
+
         navigate("/join/name", {
           state: { code: pin, title: game.title },
           replace,
@@ -40,7 +44,7 @@ export default function JoinPin() {
         setBusy(false);
       }
     },
-    [navigate],
+    [navigate, viewer, refresh],
   );
 
   useEffect(() => {
@@ -52,7 +56,6 @@ export default function JoinPin() {
   if (viewer?.kind === "manager") {
     return <Navigate to="/admin" replace />;
   }
-  // Гра ще йде (або гість не зареєструвався після кінця): повертаємо в неї.
   if (viewer && shouldResumeGame(viewer)) {
     return <Navigate to="/play" replace />;
   }
