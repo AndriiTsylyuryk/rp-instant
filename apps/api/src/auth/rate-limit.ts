@@ -1,5 +1,5 @@
-import createHttpError from "http-errors";
 import type { FastifyRequest } from "fastify";
+import { AppError } from "../errors.js";
 
 type Bucket = { count: number; resetAt: number };
 
@@ -40,7 +40,7 @@ export function rateLimit({ name, max, windowMs, key }: Options) {
 
     bucket.count += 1;
     if (bucket.count > max) {
-      throw createHttpError(429, "rate_limited");
+      throw new AppError(429, "rate_limited");
     }
   };
 }

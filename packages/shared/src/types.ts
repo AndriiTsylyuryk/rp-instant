@@ -90,3 +90,21 @@ export type Viewer =
       kind: "manager";
       manager: { id: string; name: string; clubId: string };
     };
+
+export type FanGame = {
+  gameId: string;
+  title: string;
+  status: "draft" | "lobby" | "live" | "ended" | "cancelled";
+  playedAt: string | null;
+  nickname: string;
+  score: number;
+  /** лише для завершених ігор; null, якщо гравець прихований */
+  rank: number | null;
+  players: number | null;
+};
+
+export type FanGamesPage = {
+  items: FanGame[];
+  page: number;
+  totalPages: number;
+};

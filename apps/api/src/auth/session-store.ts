@@ -1,10 +1,12 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   deleteAuthSession,
+  deleteAuthSessionsByUser,
   deleteExpiredAuthSessions,
   extendAuthSession,
   findAuthSession,
   insertAuthSession,
+  setAuthSessionsNickname,
   type AuthRole,
   type SessionProfile,
 } from "../repo/auth-sessions.js";
@@ -115,6 +117,29 @@ export async function destroyAuthSession(token: string): Promise<void> {
 
   if (session) {
     await deleteAuthSession(session.rowId);
+  }
+}
+
+/** Вихід з усіх пристроїв (напр. при видаленні акаунта). */
+export async function destroyUserAuthSessions(userId: string): Promise<void> {
+  for (const [hash, session] of cache) {
+    if (session.userId === userId) {
+      cache.delete(hash);
+    }
+  }
+  await deleteAuthSessionsByUser(userId);
+}
+
+/** Нікнейм живе в profile сесії, тож оновлюємо і БД, і кеш. */
+export async function updateUserNickname(
+  userId: string,
+  nickname: string,
+): Promise<void> {
+  await setAuthSessionsNickname(userId, nickname);
+  for (const session of cache.values()) {
+    if (session.userId === userId) {
+      session.profile = { ...session.profile, nickname };
+    }
   }
 }
 

@@ -22,6 +22,13 @@ export const http = axios.create({
   timeout: 10_000,
 });
 
+let onSessionExpired: (() => void) | null = null;
+
+/** Викликається, коли бекенд повідомляє, що сесія недійсна (401 no_session). */
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler;
+}
+
 http.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
@@ -34,6 +41,7 @@ http.interceptors.response.use(
           : status === 0
             ? "network"
             : "unknown";
+      if (code === "no_session") onSessionExpired?.();
       return Promise.reject(new ApiError(status, code));
     }
     return Promise.reject(error);

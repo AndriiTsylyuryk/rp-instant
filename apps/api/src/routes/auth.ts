@@ -1,4 +1,3 @@
-import createHttpError from "http-errors";
 import { z } from "zod";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {} from "@fastify/cookie";
@@ -32,6 +31,7 @@ import {
   requestFanVerification,
 } from "../repo/fans.js";
 import { linkParticipantToFan } from "../repo/participants.js";
+import { AppError } from "../errors.js";
 import { getCachedGameById } from "../game-cache.js";
 import { resultsWindowOver } from "../game-lifecycle.js";
 import { getSession } from "../session-cache.js";
@@ -153,18 +153,6 @@ async function startSession(
 }
 
 export async function authRoutes(app: FastifyInstance) {
-  app.setErrorHandler((err, req, reply) => {
-    if (createHttpError.isHttpError(err)) {
-      return reply.code(err.statusCode).send({ error: err.message });
-    }
-    const status = (err as { statusCode?: number }).statusCode;
-    if (typeof status === "number" && status >= 400 && status < 500) {
-      return reply.code(status).send({ error: "bad_request" });
-    }
-    req.log.error(err);
-    return reply.code(500).send({ error: "internal" });
-  });
-
   app.post(
     "/auth/signup",
     { preHandler: [csrfGuard, signupByIp] },
@@ -173,7 +161,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = SignupBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       const created = await createFan({
@@ -182,7 +170,7 @@ export async function authRoutes(app: FastifyInstance) {
         nickname: body.data.nickname,
       });
       if (!created.ok) {
-        throw createHttpError(
+        throw new AppError(
           created.reason === "email_taken" ? 409 : 400,
           created.reason,
         );
@@ -201,7 +189,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = LoginBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       const user = await verifyPassword(
@@ -210,10 +198,10 @@ export async function authRoutes(app: FastifyInstance) {
         body.data.password,
       );
       if (!user) {
-        throw createHttpError(401, "invalid_credentials");
+        throw new AppError(401, "invalid_credentials");
       }
       if (user.emailVerified === false) {
-        throw createHttpError(403, "email_not_verified");
+        throw new AppError(403, "email_not_verified");
       }
 
       return startSession(req, reply, user);
@@ -228,12 +216,12 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = SessionBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       const user = await verifyPbToken(body.data.collection, body.data.token);
       if (!user) {
-        throw createHttpError(401, "invalid_token");
+        throw new AppError(401, "invalid_token");
       }
 
       return startSession(req, reply, user);
@@ -248,10 +236,10 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = VerifyBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
       if (!(await confirmFanVerification(body.data.token))) {
-        throw createHttpError(400, "invalid_verification_token");
+        throw new AppError(400, "invalid_verification_token");
       }
       return { ok: true };
     },
@@ -265,7 +253,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = ResendBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       await sendVerification(req, body.data.email);
@@ -281,12 +269,12 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = GoogleBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       const identity = await verifyGoogleIdToken(body.data.credential);
       if (!identity) {
-        throw createHttpError(401, "invalid_google_token");
+        throw new AppError(401, "invalid_google_token");
       }
 
       const { collection } = body.data;
@@ -299,7 +287,7 @@ export async function authRoutes(app: FastifyInstance) {
 
       if (!record) {
         if (collection === "managers") {
-          throw createHttpError(403, "no_account");
+          throw new AppError(403, "no_account");
         }
         return {
           status: "signup_required" as const,
@@ -329,12 +317,12 @@ export async function authRoutes(app: FastifyInstance) {
 
       const body = GoogleCompleteBody.safeParse(req.body);
       if (!body.success) {
-        throw createHttpError(400, "bad_request");
+        throw new AppError(400, "bad_request");
       }
 
       const claims = verifySignupToken(body.data.signupToken);
       if (!claims) {
-        throw createHttpError(401, "signup_expired");
+        throw new AppError(401, "signup_expired");
       }
 
       const created = await createFan({
@@ -344,7 +332,7 @@ export async function authRoutes(app: FastifyInstance) {
         verified: true,
       });
       if (!created.ok) {
-        throw createHttpError(
+        throw new AppError(
           created.reason === "email_taken" ? 409 : 400,
           created.reason,
         );

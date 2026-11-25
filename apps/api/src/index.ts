@@ -1,7 +1,9 @@
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
+import { registerErrorHandler } from "./errors.js";
 import { playRoutes } from "./routes/play.js";
 import { authRoutes } from "./routes/auth.js";
+import { accountRoutes } from "./routes/account.js";
 import { startAuthSessionSweep } from "./auth/session-store.js";
 import { startCacheSweep } from "./cache-sweep.js";
 
@@ -10,11 +12,13 @@ const app = Fastify({
   trustProxy: true,
 });
 
+registerErrorHandler(app);
 await app.register(cookie);
 
 app.decorateRequest("auth", null);
 await app.register(playRoutes, { prefix: "/api" });
 await app.register(authRoutes, { prefix: "/api" });
+await app.register(accountRoutes, { prefix: "/api" });
 startAuthSessionSweep();
 startCacheSweep();
 

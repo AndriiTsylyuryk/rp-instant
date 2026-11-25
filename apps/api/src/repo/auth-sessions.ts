@@ -113,3 +113,33 @@ export async function deleteExpiredAuthSessions(): Promise<number> {
   }
   return rows.length;
 }
+
+export async function deleteAuthSessionsByUser(userId: string): Promise<void> {
+  const rows = await withPb(() =>
+    pb.collection("auth_sessions").getFullList<{ id: string }>({
+      filter: pb.filter("user_id = {:userId}", { userId }),
+      fields: "id",
+    }),
+  );
+  for (const row of rows) {
+    await deleteAuthSession(row.id);
+  }
+}
+
+export async function setAuthSessionsNickname(
+  userId: string,
+  nickname: string,
+): Promise<void> {
+  const rows = await withPb(() =>
+    pb.collection("auth_sessions").getFullList<AuthSessionRow>({
+      filter: pb.filter("user_id = {:userId}", { userId }),
+    }),
+  );
+  for (const row of rows) {
+    await withPb(() =>
+      pb.collection("auth_sessions").update(row.id, {
+        profile: { ...(row.profile ?? EMPTY_PROFILE), nickname },
+      }),
+    );
+  }
+}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { Viewer } from "@rp/shared";
 import { fetchViewer, logout } from "../api/auth";
+import { setSessionExpiredHandler } from "../api/http";
 import { AuthContext } from "./AuthContext";
 import type { AuthContextValue } from "./AuthContext";
 
@@ -20,6 +21,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    setSessionExpiredHandler(() => {
+      void refresh();
+    });
+    return () => setSessionExpiredHandler(null);
   }, [refresh]);
 
   const signOut = useCallback(async () => {

@@ -90,3 +90,10 @@ export async function confirmFanVerification(token: string): Promise<boolean> {
     throw err;
   }
 }
+
+export async function updateFanNickname(
+  id: string,
+  nickname: string,
+): Promise<void> {
+  await withPb(() => pb.collection("fans").update(id, { nickname }));
+}

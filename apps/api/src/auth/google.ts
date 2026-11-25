@@ -1,4 +1,4 @@
-import createHttpError from "http-errors";
+import { AppError } from "../errors.js";
 
 const TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo";
 const ISSUERS = new Set(["accounts.google.com", "https://accounts.google.com"]);
@@ -14,7 +14,7 @@ export async function verifyGoogleIdToken(
 ): Promise<GoogleIdentity | null> {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    throw createHttpError(503, "google_not_configured");
+    throw new AppError(503, "google_not_configured");
   }
 
   let res: Response;
@@ -26,11 +26,11 @@ export async function verifyGoogleIdToken(
       },
     );
   } catch {
-    throw createHttpError(502, "google_unavailable");
+    throw new AppError(502, "google_unavailable");
   }
 
   if (res.status >= 500) {
-    throw createHttpError(502, "google_unavailable");
+    throw new AppError(502, "google_unavailable");
   }
   if (!res.ok) {
     return null;

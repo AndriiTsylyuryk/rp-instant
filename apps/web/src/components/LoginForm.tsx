@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import type { AuthCollection, Viewer } from "@rp/shared";
 import { isApiError } from "../api/http";
 import { useAuth } from "../auth/useAuth";
+import { describeAuthError } from "../lib/errorMessages";
 import {
   completeGoogleSignup,
   loginWithGoogle,
@@ -57,7 +58,7 @@ export function LoginForm({
       }
     } catch (err) {
       if (isApiError(err) && err.code === "signup_expired") setPending(null);
-      setError(describe(err));
+      setError(describeAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -112,7 +113,7 @@ export function LoginForm({
       await resendVerification(verifyEmail);
       setResent(true);
     } catch (err) {
-      setError(describe(err));
+      setError(describeAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -258,27 +259,4 @@ export function LoginForm({
       )}
     </form>
   );
-}
-
-function describe(err: unknown): string {
-  if (isApiError(err)) {
-    const known: Record<string, string> = {
-      invalid_credentials: "Invalid email or password.",
-      invalid_token: "Could not verify sign-in.",
-      invalid_google_token: "Could not verify Google sign-in.",
-      google_unavailable: "Google is unavailable. Try again later.",
-      google_not_configured: "Google sign-in is not configured.",
-      no_account: "No account with this email.",
-      email_not_verified: "Verify your email first.",
-      signup_expired: "Sign-up expired. Continue with Google again.",
-      email_taken: "An account with this email already exists.",
-      rate_limited: "Too many attempts. Try again later.",
-      bad_request: "Check your input (password must be at least 8 characters).",
-      bad_origin: "Request blocked (origin).",
-      network: "No connection to the server.",
-    };
-    if (known[err.code]) return known[err.code];
-  }
-  if (err instanceof Error && err.message) return err.message;
-  return "Something went wrong.";
 }

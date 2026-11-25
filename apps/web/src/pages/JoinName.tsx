@@ -4,7 +4,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { joinGame } from "../api/game";
 import { useAuth } from "../auth/useAuth";
 import { AuthCta } from "../components/AuthCta";
-import { describeJoinError } from "../lib/joinErrors";
+import { describeJoinError } from "../lib/errorMessages";
 import { shouldResumeGame } from "../lib/resumeGame";
 
 type NameState = { code?: string; title?: string } | null;
@@ -68,7 +68,7 @@ export default function JoinName() {
     setError(null);
     try {
       await joinGame(code!, nickname.trim());
-      await refresh(); // Viewer = guest (або fan у грі)
+      await refresh();
       navigate("/play");
     } catch (err) {
       setError(describeJoinError(err));

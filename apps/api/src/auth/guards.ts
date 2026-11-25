@@ -1,6 +1,6 @@
-import createHttpError from "http-errors";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type {} from "@fastify/cookie";
+import { AppError } from "../errors.js";
 import type { AuthRole } from "../repo/auth-sessions.js";
 import { getAuthSession, type AuthSession } from "./session-store.js";
 import { AUTH_COOKIE } from "./cookies.js";
@@ -24,7 +24,7 @@ export async function csrfGuard(req: FastifyRequest): Promise<void> {
   }
   const origin = req.headers.origin;
   if (!origin || !ALLOWED_ORIGINS.includes(origin)) {
-    throw createHttpError(403, "bad_origin");
+    throw new AppError(403, "bad_origin");
   }
 }
 
@@ -34,13 +34,13 @@ export async function authenticate(
 ): Promise<void> {
   const token = req.cookies[AUTH_COOKIE];
   if (!token) {
-    throw createHttpError(401, "no_session");
+    throw new AppError(401, "no_session");
   }
 
   const session = await getAuthSession(token);
   if (!session) {
     reply.clearCookie(AUTH_COOKIE, { path: "/api" });
-    throw createHttpError(401, "no_session");
+    throw new AppError(401, "no_session");
   }
 
   req.auth = session;
@@ -50,7 +50,7 @@ export function requireRole(...roles: AuthRole[]) {
   return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     await authenticate(req, reply);
     if (!req.auth || !roles.includes(req.auth.role)) {
-      throw createHttpError(403, "forbidden");
+      throw new AppError(403, "forbidden");
     }
   };
 }

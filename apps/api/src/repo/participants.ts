@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import type { FanGame, FanGamesPage } from "@rp/shared";
 import { pb, withPb } from "./pb.js";
 import { ClientResponseError } from "pocketbase";
 
@@ -153,4 +154,86 @@ export function revokeParticipantSession(
       .collection("participants")
       .update(participantId, { session_token: newSessionToken() }),
   );
+}
+
+type FanGameRow = {
+  id: string;
+  game: string;
+  nickname: string;
+  score: number;
+  hidden: boolean;
+  created: string;
+  expand?: {
+    game?: {
+      id: string;
+      title: string;
+      status: FanGame["status"];
+      starts_at: string;
+      ended_at: string;
+    };
+  };
+};
+
+// async function countParticipants(filter: string): Promise<number> {
+//   const res = await withPb(() =>
+//     pb.collection("participants").getList(1, 1, { filter, fields: "id" }),
+//   );
+//   return res.totalItems;
+// }
+
+export async function listFanGames(
+  fanId: string,
+  page: number,
+  perPage: number,
+): Promise<FanGamesPage> {
+  const res = await withPb(() =>
+    pb.collection("participants").getList<FanGameRow>(page, perPage, {
+      filter: pb.filter("fan = {:fanId}", { fanId }),
+      sort: "-created",
+      expand: "game",
+      fields:
+        "id,game,nickname,score,hidden,created," +
+        "expand.game.id,expand.game.title,expand.game.status," +
+        "expand.game.starts_at,expand.game.ended_at",
+    }),
+  );
+
+  const items = await Promise.all(
+    res.items.map(async (row): Promise<FanGame> => {
+      const game = row.expand?.game;
+      const score = row.score ?? 0;
+      const ended = game?.status === "ended";
+
+      let rank: number | null = null;
+      let players: number | null = null;
+      if (ended && !row.hidden) {
+        const [better, total] = await Promise.all([
+          countParticipants(
+            pb.filter("game = {:g} && hidden != true && score > {:s}", {
+              g: row.game,
+              s: score,
+            }),
+          ),
+          countParticipants(
+            pb.filter("game = {:g} && hidden != true", { g: row.game }),
+          ),
+        ]);
+        rank = better + 1;
+        players = total;
+      }
+
+      return {
+        gameId: row.game,
+        title: game?.title ?? "",
+        status: game?.status ?? "ended",
+        playedAt: game?.ended_at || game?.starts_at || row.created || null,
+        nickname: row.nickname,
+        score,
+        rank,
+        players,
+      };
+    }),
+  );
+
+  return { items, page: res.page, totalPages: res.totalPages };
 }

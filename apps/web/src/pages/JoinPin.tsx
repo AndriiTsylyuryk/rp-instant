@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { joinGame, lookupGame } from "../api/game";
 import { useAuth } from "../auth/useAuth";
-import { describeJoinError } from "../lib/joinErrors";
+import { describeJoinError } from "../lib/errorMessages";
 import { shouldResumeGame } from "../lib/resumeGame";
 
 export default function JoinPin() {
