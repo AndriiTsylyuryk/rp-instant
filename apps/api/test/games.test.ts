@@ -38,6 +38,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     starts_at: "2026-01-01T12:00:00.000Z",
     schedule: null,
     joining_locked: false,
+    lobby_minutes: 5,
     sponsor_name: null,
     sponsor_logo: null,
     ...overrides,
@@ -77,6 +78,7 @@ describe("getGameByCode", () => {
       startsAt: Date.parse("2026-01-01T12:00:00.000Z"),
       schedule: null,
       joiningLocked: false,
+      lobbyMinutes: 5,
       sponsor: null,
     });
   });

@@ -1,13 +1,14 @@
 import { useParams } from "react-router-dom";
-import { fetchScreenState, pollDelay } from "../api/game";
-import { usePolling } from "../hooks/usePolling";
+import { fetchScreenState } from "../api/game";
+import { GameTimer } from "../components/GameTimer";
+import { useGameState } from "../hooks/useGameState";
+import { QUESTION_TIME_S } from "@rp/shared";
 
 export default function Screen() {
   // Екран відкривається за непередбачуваним токеном, а не за кодом приєднання.
   const { token = "" } = useParams();
-  const { data: state, error } = usePolling(
-    () => fetchScreenState(token),
-    pollDelay,
+  const { state, error } = useGameState(
+    (opts) => fetchScreenState(token, opts),
     [token],
   );
 
@@ -35,6 +36,16 @@ export default function Screen() {
           <p>{joinUrl}</p>
           {/* TODO: QR-code (qrcode.react → <QRCodeSVG value={joinUrl} />) */}
           <p>Players: {state.players}</p>
+          {state.nextBoundaryAt !== null && (
+            <GameTimer
+              key={`lobby:${state.nextBoundaryAt}`}
+              targetAt={state.nextBoundaryAt}
+              serverNow={state.serverNow}
+              totalSeconds={(state.game.lobbyMinutes ?? 0) * 60}
+              size={240}
+              clock
+            />
+          )}
         </div>
       );
     case "get-ready":
@@ -42,6 +53,16 @@ export default function Screen() {
     case "question":
       return (
         <div>
+          {state.nextBoundaryAt !== null && (
+            <GameTimer
+              key={`q:${phase.index}`}
+              targetAt={state.nextBoundaryAt}
+              serverNow={state.serverNow}
+              totalSeconds={QUESTION_TIME_S}
+              size={200}
+              urgency
+            />
+          )}
           <h1>{state.question?.text}</h1>
           <ol>
             {state.question?.options.map((option, i) => (

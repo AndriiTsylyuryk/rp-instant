@@ -114,6 +114,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     startsAt: null,
     schedule: null,
     joiningLocked: false,
+    lobbyMinutes: 5,
     sponsor: null,
     ...overrides,
   };
@@ -293,6 +294,8 @@ describe("GET /api/game/state", () => {
         locale: "et",
         startsAt: null,
         joiningLocked: false,
+        lobbyMinutes: 5,
+        scheduleKey: null,
         sponsor: null,
       },
     });
@@ -889,6 +892,8 @@ describe("GET /api/play/state", () => {
         locale: "et",
         startsAt: null,
         joiningLocked: false,
+        lobbyMinutes: 5,
+        scheduleKey: null,
         sponsor: null,
       },
       me: { id: "participant_1", nickname: "neo", score: 5, rank: 2 },

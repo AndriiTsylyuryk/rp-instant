@@ -27,3 +27,5 @@
 .landing-steps h2 { margin: 2px 0 4px; font-size: 18px; }
 .landing-steps p { font-size: 14px; }
 .landing-admin { margin-top: 24px; font-size: 14px; }
+.game-timer { display: flex; justify-content: center; margin: 0 auto 16px; }
+.game-timer-text { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.5rem; }

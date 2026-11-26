@@ -1,5 +1,6 @@
 import {
   nextPollDelay,
+  type Schedule,
   type LeaderboardRow,
   type Phase,
   type PublicQuestion,
@@ -26,6 +27,9 @@ export type PublicState = {
     locale: "et" | "en";
     startsAt: number | null;
     joiningLocked: boolean;
+    lobbyMinutes: number | null;
+    scheduleKey: string | null;
+    schedule?: Schedule | null;
     sponsor: { name: string | null; logoUrl: string | null } | null;
   };
 };
@@ -35,7 +39,6 @@ export type PlayStateResponse = PublicState & {
   top: LeaderboardRow[];
 };
 
-/** Перший крок входу: чи існує гра з таким PIN і чи можна приєднатись. */
 export async function lookupGame(code: string): Promise<{
   title: string;
   sponsor: PublicState["game"]["sponsor"];
@@ -54,24 +57,31 @@ export async function fetchPublicState(code: string): Promise<PublicState> {
   return data;
 }
 
-/** Стан для екрана арени: публічний стан плюс код приєднання (для QR). */
 export type ScreenState = PublicState & { joinCode: string };
 
-export async function fetchScreenState(token: string): Promise<ScreenState> {
+export type FetchOptions = { schedule?: boolean };
+
+export async function fetchScreenState(
+  token: string,
+  opts: FetchOptions = {},
+): Promise<ScreenState> {
   const { data } = await http.get<ScreenState>("/screen/state", {
-    params: { token },
+    params: { token, ...(opts.schedule ? { schedule: 1 } : {}) },
   });
   return data;
 }
 
-/** Через скільки питати знову. null = більше не питати (завершена гра). */
 export function pollDelay(state: PublicState): number | null {
   if (state.phase === "ended") return null;
   return nextPollDelay(state, state.serverNow);
 }
 
-export async function fetchPlayState(): Promise<PlayStateResponse> {
-  const { data } = await http.get<PlayStateResponse>("/play/state");
+export async function fetchPlayState(
+  opts: FetchOptions = {},
+): Promise<PlayStateResponse> {
+  const { data } = await http.get<PlayStateResponse>("/play/state", {
+    params: opts.schedule ? { schedule: 1 } : undefined,
+  });
   return data;
 }
 

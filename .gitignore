@@ -5,3 +5,5 @@ data/
 *.log
 load/game.js
 load/results.json
+load/poll-schedule.js
+load/poll.json

@@ -22,6 +22,7 @@ function makeGame(overrides: Partial<Game> = {}): Game {
     startsAt: START,
     schedule,
     joiningLocked: false,
+    lobbyMinutes: 5,
     sponsor: null,
     ...overrides,
   };

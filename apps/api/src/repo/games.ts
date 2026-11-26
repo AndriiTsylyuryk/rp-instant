@@ -12,6 +12,7 @@ type GameRow = {
   starts_at: string;
   schedule: Schedule | null;
   joining_locked: boolean;
+  lobby_minutes: number | null;
   sponsor_name: string | null;
   sponsor_logo: string | null;
 };
@@ -26,6 +27,7 @@ export type Game = {
   startsAt: number | null;
   schedule: Schedule | null;
   joiningLocked: boolean;
+  lobbyMinutes: number | null;
   sponsor: {
     name: string | null;
     logoUrl: string | null;
@@ -43,6 +45,7 @@ function toGame(row: GameRow): Game {
     startsAt: row.starts_at ? new Date(row.starts_at).getTime() : null,
     schedule: row.schedule,
     joiningLocked: row.joining_locked,
+    lobbyMinutes: row.lobby_minutes || null,
     sponsor:
       row.sponsor_name || row.sponsor_logo
         ? {

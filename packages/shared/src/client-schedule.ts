@@ -7,6 +7,9 @@ import {
   LOBBY_LAST_MS,
   LOBBY_NEAR_MS,
   MIN_DELAY_MS,
+  PREFETCH_JITTER_MS,
+  PREFETCH_MS,
+  STARTING_BUFFER_MS,
 } from "./constants.js";
 import { Phase } from "./types.js";
 
@@ -23,6 +26,19 @@ function untilBoundary(state: ScheduleView, now: number): number {
     return HEARTBEAT_MS;
   }
   return Math.max(0, state.nextBoundaryAt - now);
+}
+
+function nextBoundaryDelay(
+  state: ScheduleView,
+  now: number,
+  random: Random,
+): number {
+  const left = untilBoundary(state, now);
+
+  if (state.nextQuestion === null && left > PREFETCH_MS) {
+    return floor(left - PREFETCH_MS + random() * PREFETCH_JITTER_MS);
+  }
+  return floor(left + random() * BOUNDARY_JITTER_MS);
 }
 
 export function nextPollDelay(
@@ -42,6 +58,15 @@ export function nextPollDelay(
 
     case "lobby": {
       const left = untilBoundary(state, now);
+
+      if (state.nextBoundaryAt !== null && left <= LOBBY_NEAR_MS) {
+        return (
+          left +
+          (STARTING_BUFFER_MS - PREFETCH_MS) +
+          random() * PREFETCH_JITTER_MS
+        );
+      }
+
       const base =
         left > 5 * 60_000
           ? LOBBY_FAR_MS
@@ -52,7 +77,7 @@ export function nextPollDelay(
     }
 
     case "get-ready":
-      return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
+      return nextBoundaryDelay(state, now, random);
 
     case "question":
       return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
@@ -62,7 +87,7 @@ export function nextPollDelay(
         return COUNTS_RETRY_MS + random() * COUNTS_RETRY_MS;
       }
 
-      return floor(untilBoundary(state, now) + random() * BOUNDARY_JITTER_MS);
+      return nextBoundaryDelay(state, now, random);
     }
   }
 }

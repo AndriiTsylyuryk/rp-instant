@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
-import { fetchPlayState, pollDelay, submitAnswer } from "../api/game";
+import { fetchPlayState, submitAnswer } from "../api/game";
 import type { PlayStateResponse } from "../api/game";
 import { isApiError } from "../api/http";
 import { AuthCta } from "../components/AuthCta";
-import { usePolling } from "../hooks/usePolling";
+import { GameTimer } from "../components/GameTimer";
+import { QUESTION_TIME_S } from "@rp/shared";
+import { useGameState } from "../hooks/useGameState";
 
 export default function Play() {
-  // Гра береться з cookie rp_play (див. /play/state), а не з URL.
-  const { data: state, error } = usePolling(fetchPlayState, pollDelay, []);
+  const { state, error } = useGameState(fetchPlayState, []);
 
   if (isApiError(error) && error.status === 401) {
     return <Navigate to="/" replace />;
@@ -39,6 +40,15 @@ function PhaseView({ state }: { state: PlayStateResponse }) {
         <div>
           <h1>{state.game.title}</h1>
           <p>Waiting to start… Players: {state.players}</p>
+          {state.nextBoundaryAt !== null && (
+            <GameTimer
+              key={`lobby:${state.nextBoundaryAt}`}
+              targetAt={state.nextBoundaryAt}
+              serverNow={state.serverNow}
+              totalSeconds={(state.game.lobbyMinutes ?? 0) * 60}
+              clock
+            />
+          )}
         </div>
       );
     case "get-ready":
@@ -85,6 +95,15 @@ function Question({
 
   return (
     <div>
+      {state.nextBoundaryAt !== null && (
+        <GameTimer
+          key={`q:${index}`}
+          targetAt={state.nextBoundaryAt}
+          serverNow={state.serverNow}
+          totalSeconds={QUESTION_TIME_S}
+          urgency
+        />
+      )}
       <h1>{question.text}</h1>
       {question.options.map((text, i) => (
         <button

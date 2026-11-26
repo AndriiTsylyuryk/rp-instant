@@ -89,9 +89,7 @@ function isLive(phase: StateSlice["phase"]): phase is LivePhase {
 }
 
 function isGameOver(phase: StateSlice["phase"]): boolean {
-  return typeof phase === "string"
-    ? phase === "ended"
-    : phase.type === "final";
+  return typeof phase === "string" ? phase === "ended" : phase.type === "final";
 }
 
 function readCode(value: unknown): string {
@@ -226,7 +224,19 @@ async function answeredSlice(gameId: string, participantId: string) {
     .filter((answer) => answer.index >= 0);
 }
 
-async function publicState(game: Game, now: number) {
+/** Змінюється, коли змінюється час розкладу (клієнт тоді перезавантажує його). */
+function scheduleKeyOf(game: Game): string | null {
+  if (game.startsAt === null || game.schedule === null) {
+    return null;
+  }
+  return `${game.startsAt}:${game.schedule.endsAt}:${game.schedule.questionCount}`;
+}
+
+function wantsSchedule(req: { query: unknown }): boolean {
+  return (req.query as Record<string, unknown>).schedule === "1";
+}
+
+async function publicState(game: Game, now: number, withSchedule = false) {
   const { phase, nextBoundaryAt } = computeState(game, now);
   reconcileStatus(game, phase);
   const slice = await questionSlice(game, phase, now);
@@ -245,6 +255,9 @@ async function publicState(game: Game, now: number) {
       locale: game.locale,
       startsAt: game.startsAt,
       joiningLocked: game.joiningLocked,
+      lobbyMinutes: game.lobbyMinutes,
+      scheduleKey: scheduleKeyOf(game),
+      ...(withSchedule ? { schedule: game.schedule } : {}),
       sponsor: game.sponsor,
     },
   };
@@ -263,14 +276,9 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: "not_found" });
     }
 
-    return publicState(game, Date.now());
+    return publicState(game, Date.now(), wantsSchedule(req));
   });
 
-  /**
-   * Перший крок входу: чи існує гра з таким PIN і чи можна приєднатися.
-   * Гра береться з game-cache, тож у сталому режимі це 0 запитів у БД, а
-   * наступний /join бере ту саму гру з того ж кешу.
-   */
   app.get("/game/lookup", { preHandler: lookupByIp }, async (req, reply) => {
     reply.header("Cache-Control", "no-store");
 
@@ -307,7 +315,10 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: "not_found" });
     }
 
-    return { ...(await publicState(game, Date.now())), joinCode: game.code };
+    return {
+      ...(await publicState(game, Date.now(), wantsSchedule(req))),
+      joinCode: game.code,
+    };
   });
 
   app.post("/join", async (req, reply) => {
@@ -416,7 +427,7 @@ export async function playRoutes(app: FastifyInstance) {
       return reply.code(401).send({ error: "no_session" });
     }
 
-    const base = await publicState(game, now);
+    const base = await publicState(game, now, wantsSchedule(req));
     const board = await getBoard(game.id);
 
     return {

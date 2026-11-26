@@ -3,6 +3,7 @@ import {
   COUNTS_RETRY_MS,
   LOBBY_LAST_MS,
   PAUSE_MS,
+  PREFETCH_MS,
   QUESTION_TIME_S,
   STARTING_BUFFER_MS,
 } from "../src/constants.js";
@@ -77,7 +78,21 @@ describe("nextPollDelay", () => {
     ).toBe(COUNTS_RETRY_MS);
   });
 
-  it("polls while waiting in the lobby", () => {
+  it("polls at the last lobby cadence away from the start", () => {
+    expect(
+      nextPollDelay(
+        state({
+          phase: { type: "lobby" },
+          nextBoundaryAt: STARTS_AT,
+          nextQuestion: null,
+        }),
+        STARTS_AT - 30_000,
+        randomZero,
+      ),
+    ).toBe(LOBBY_LAST_MS);
+  });
+
+  it("polls when the first question is prefetched near the start", () => {
     expect(
       nextPollDelay(
         state({
@@ -88,7 +103,7 @@ describe("nextPollDelay", () => {
         STARTS_AT - 1_000,
         randomZero,
       ),
-    ).toBe(LOBBY_LAST_MS);
+    ).toBe(1_000 + STARTING_BUFFER_MS - PREFETCH_MS);
   });
 
   it("stops polling after the final phase", () => {
